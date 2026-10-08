@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>東邑盤點</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root { --bg:#f1f5f9; --card:#fff; --ink:#0f172a; --mute:#64748b; --line:#e2e8f0; --pri:#1d4ed8; --ok:#16a34a; --bad:#dc2626; --warn:#b45309; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif; background: var(--bg); color: var(--ink); font-size: 17px; }
+header { background: #16213e; color: #fff; padding: 12px 16px; display: flex; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 1.15rem; letter-spacing: 1px; flex: 1; }
+header .who { font-size: .85rem; color: #aac4ff; }
+header button { background: rgba(255,255,255,.12); color: #fff; border: 0; border-radius: 8px; padding: 6px 10px; font-size: .85rem; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 14px 16px 40px; }
+.card { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.05); }
+.searchrow { display: flex; gap: 8px; }
+#q { flex: 1; min-width: 0; font-size: 1.25rem; padding: 14px; border: 2px solid var(--pri); border-radius: 12px; text-transform: uppercase; }
+.btn { border: 0; border-radius: 12px; padding: 14px 18px; font-size: 1.05rem; font-weight: 700; color: #fff; background: var(--pri); }
+.btn.cam { background: #0f766e; }
+.btn.gray { background: #94a3b8; }
+.btn.ok { background: var(--ok); }
+.btn:disabled { opacity: .5; }
+.meta { color: var(--mute); font-size: .85rem; margin-top: 8px; }
+#reader { margin-top: 12px; display: none; border-radius: 12px; overflow: hidden; }
+.res { border-top: 1px solid var(--line); }
+.res .it { padding: 12px 4px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
+.res .it .n { flex: 1; min-width: 0; }
+.res .it .n b { display: block; font-size: 1rem; }
+.res .it .n span { color: var(--mute); font-size: .85rem; }
+.res .it .s { font-weight: 700; font-size: 1.1rem; min-width: 56px; text-align: right; }
+.empty { color: var(--mute); text-align: center; padding: 14px; }
+/* detail */
+#detail { display: none; }
+.dname { font-size: 1.3rem; font-weight: 800; line-height: 1.35; }
+.dcode { color: var(--mute); margin-top: 4px; }
+.sys { display: flex; justify-content: space-between; align-items: center; background: #eff6ff; border-radius: 12px; padding: 12px 14px; margin: 14px 0; }
+.sys b { font-size: 1.6rem; color: var(--pri); }
+.counter { display: flex; align-items: center; gap: 10px; justify-content: center; margin: 6px 0 4px; }
+.counter button { width: 72px; height: 72px; border-radius: 50%; border: 0; font-size: 2rem; font-weight: 700; background: #e2e8f0; color: var(--ink); }
+#cnt::-webkit-outer-spin-button, #cnt::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#cnt { -moz-appearance: textfield; width: 150px; height: 80px; text-align: center; font-size: 2.6rem; font-weight: 800; border: 3px solid var(--pri); border-radius: 14px; }
+.diff { text-align: center; font-size: 1.1rem; font-weight: 700; min-height: 30px; margin: 6px 0 12px; }
+.actions { display: flex; gap: 10px; }
+.actions .btn { flex: 1; padding: 18px; font-size: 1.2rem; }
+/* history */
+.hist .h { display: flex; gap: 8px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); font-size: .95rem; }
+.hist .h .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.t-pending { background: #fef3c7; color: var(--warn); }
+.t-applied { background: #dcfce7; color: var(--ok); }
+.t-error { background: #fee2e2; color: var(--bad); }
+h2 { font-size: 1.05rem; margin-bottom: 8px; }
+/* login */
+#login { max-width: 420px; margin: 60px auto; }
+#login select, #login input { width: 100%; font-size: 1.2rem; padding: 12px; border: 2px solid var(--line); border-radius: 12px; margin: 6px 0 14px; }
+#toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #0f172a; color: #fff; padding: 12px 18px; border-radius: 12px; font-weight: 700; display: none; z-index: 20; max-width: 90%; }
+.pos { color: var(--ok); } .neg { color: var(--bad); }
+</style>
+</head>
+<body>
+
+<div id="login" class="card" style="display:none">
+  <h2>東邑盤點登入</h2>
+  <label>盤點人</label>
+  <select id="lgName">
+    <option>超級帥榮</option><option>阿霖仔</option><option>光</option><option>俊維</option><option>中寶</option>
+    <option>阿信</option><option>阿傑</option><option>Ka</option><option>永鈞</option><option>阿賢大師</option>
+  </select>
+  <label>PIN 碼</label>
+  <input id="lgPin" type="password" inputmode="numeric" autocomplete="off">
+  <button class="btn" style="width:100%" onclick="login()">進入盤點</button>
+  <div class="meta" id="lgMsg"></div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <h1>東邑盤點</h1>
+    <span class="who" id="who"></span>
+    <button onclick="logout()">登出</button>
+  </header>
+  <div class="wrap">
+    <div class="card" id="searchCard">
+      <div class="searchrow">
+        <input id="q" placeholder="掃描／輸入料號或名稱" autocomplete="off" enterkeyhint="search">
+        <button class="btn cam" id="camBtn" onclick="toggleCam()">📷 掃描</button>
+      </div>
+      <div id="reader"></div>
+      <div class="meta" id="meta">讀取材料庫中…</div>
+      <div class="res" id="res"></div>
+    </div>
+
+    <div class="card" id="detail">
+      <div class="dname" id="dName"></div>
+      <div class="dcode" id="dCode"></div>
+      <div class="sys"><span>東邑目前庫存</span><b id="dStock">-</b></div>
+      <div style="text-align:center;color:var(--mute);margin-bottom:4px">實際盤點數量</div>
+      <div class="counter">
+        <button onclick="bump(-1)">−</button>
+        <input id="cnt" type="number" inputmode="numeric" min="0">
+        <button onclick="bump(1)">＋</button>
+      </div>
+      <div class="diff" id="dDiff"></div>
+      <div class="actions">
+        <button class="btn gray" onclick="closeDetail()">取消</button>
+        <button class="btn ok" id="sendBtn" onclick="submitCount()">送出並寫回東邑</button>
+      </div>
+    </div>
+
+    <div class="card hist">
+      <h2>今天的盤點紀錄</h2>
+      <div id="hist"><div class="empty">還沒有紀錄</div></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+var SB_URL = "https://hxzdmosganinyhtrswlj.supabase.co";
+var SB_KEY = "sb_publishable_AYWfHD9vBAVk4Fv1tcuEVw_RTPM71RQ";
+var items = [], byKey = {}, cur = null, curStock = 0, hist = [], scanner = null, pin = "", who = "";
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function toast(t, ms) { var e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(e._t); e._t = setTimeout(function () { e.style.display = "none"; }, ms || 2200); }
+function store(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} }
+function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+function api(path, opt) {
+  opt = opt || {};
+  var h = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
+  for (var k in (opt.headers || {})) h[k] = opt.headers[k];
+  return fetch(SB_URL + path, { method: opt.method || "GET", headers: h, body: opt.body ? JSON.stringify(opt.body) : undefined })
+    .then(function (r) { return r.text().then(function (t) { var d = t ? JSON.parse(t) : null; if (!r.ok) throw new Error((d && (d.message || d.hint)) || ("HTTP " + r.status)); return d; }); });
+}
+function rpc(fn, body) { return api("/rest/v1/rpc/" + fn, { method: "POST", body: body }); }
+
+// ---------- 條碼正規化（與入庫程式相同規則） ----------
+var PGO = /^(A[0-9FR]|B[AF]|C[0-9]|J[0-9DR]|M2|P[0-9]|XC|ES|F7)/;
+function key(s) { return String(s || "").toUpperCase().replace(/[\s\-]/g, ""); }
+
+// ---------- 登入 ----------
+function login() {
+  var p = $("lgPin").value.trim(), n = $("lgName").value;
+  if (!p) return;
+  $("lgMsg").textContent = "確認中…";
+  rpc("check_stocktake_pin", { p_pin: p }).then(function (ok) {
+    if (!ok) { $("lgMsg").textContent = "PIN 碼錯誤"; return; }
+    pin = p; who = n; store("st_pin", p); store("st_who", n); start();
+  }).catch(function (e) { $("lgMsg").textContent = "連線失敗：" + e.message; });
+}
+function logout() { store("st_pin", null); pin = ""; stopCam(); $("app").style.display = "none"; $("login").style.display = "block"; }
+
+function start() {
+  $("login").style.display = "none"; $("app").style.display = "block"; $("who").textContent = "盤點人：" + who;
+  loadItems(); loadHist(); setInterval(pollPending, 3000);
+  setTimeout(function () { $("q").focus(); }, 300);
+}
+
+// ---------- 材料庫 ----------
+function loadItems() {
+  items = []; byKey = {};
+  var page = 0, size = 1000;
+  function next() {
+    return api("/rest/v1/inventory?select=id,name,barcode,stock,applicably,updated_at&active=eq.true&order=id", { headers: { Range: (page * size) + "-" + (page * size + size - 1) } })
+      .then(function (rows) {
+        items = items.concat(rows || []);
+        if (rows && rows.length === size) { page++; return next(); }
+      });
+  }
+  next().then(function () {
+    var last = "";
+    items.forEach(function (it) {
+      it._k = key(it.barcode); it._s = (it.name + " " + it.barcode + " " + (it.applicably || "")).toUpperCase();
+      if (it._k) addIdx(it._k, it);
+      if (/^[0-9A-Z]{12}$/.test(it._k) && !PGO.test(it._k)) addIdx(it._k.substr(0, 10), it);
+      if (it.updated_at > last) last = it.updated_at;
+    });
+    $("meta").textContent = "材料庫 " + items.length + " 筆・最後同步 " + (last ? new Date(last).toLocaleString("zh-TW", { hour12: false }) : "-");
+  }).catch(function (e) { $("meta").textContent = "材料庫讀取失敗：" + e.message; });
+}
+function addIdx(k, it) { (byKey[k] = byKey[k] || []).indexOf(it) < 0 && byKey[k].push(it); }
+
+function search(raw) {
+  raw = String(raw || "").trim(); if (!raw) { $("res").innerHTML = ""; return; }
+  var k = key(raw), hits = byKey[k] || [];
+  if (!hits.length && k.length === 12) hits = byKey[k.substr(0, 10)] || [];
+  if (hits.length === 1) { openItem(hits[0]); return; }
+  if (!hits.length) {
+    var toks = raw.toUpperCase().split(/\s+/).filter(Boolean);
+    hits = items.filter(function (it) { return toks.every(function (t) { return it._s.indexOf(t) >= 0 || key(it._s).indexOf(key(t)) >= 0; }); }).slice(0, 60);
+  }
+  if (!hits.length) { $("res").innerHTML = '<div class="empty">找不到「' + esc(raw) + '」</div>'; return; }
+  $("res").innerHTML = hits.map(function (it) {
+    return '<div class="it" onclick="openById(' + it.id + ')"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(it.barcode || "（無料號）") +
+      '</span></div><div class="s">' + it.stock + '</div></div>';
+  }).join("");
+}
+function openById(id) { for (var i = 0; i < items.length; i++) if (items[i].id === id) return openItem(items[i]); }
+
+// ---------- 盤點 ----------
+function openItem(it) {
+  cur = it; stopCam();
+  $("dName").textContent = it.name; $("dCode").textContent = (it.barcode || "（無料號）") + "　編號 " + it.id;
+  $("dStock").textContent = it.stock; curStock = it.stock; $("cnt").value = ""; showDiff();
+  $("detail").style.display = "block"; $("res").innerHTML = ""; $("q").value = "";
+  $("detail").scrollIntoView({ behavior: "smooth" });
+  setTimeout(function () { $("cnt").focus(); }, 250);
+  // 讀最新庫存
+  api("/rest/v1/inventory?select=stock&id=eq." + it.id).then(function (r) {
+    if (r && r[0] && cur === it) { curStock = r[0].stock; it.stock = curStock; $("dStock").textContent = curStock; showDiff(); }
+  }).catch(function () {});
+}
+function closeDetail() { cur = null; $("detail").style.display = "none"; $("q").focus(); }
+function bump(n) { var v = parseInt($("cnt").value, 10); if (isNaN(v)) v = curStock; v = Math.max(0, v + n); $("cnt").value = v; showDiff(); }
+function showDiff() {
+  var v = parseInt($("cnt").value, 10), d = $("dDiff");
+  if (isNaN(v)) { d.innerHTML = '<span style="color:var(--mute)">輸入數量，或按＋／−</span>'; return; }
+  var df = v - curStock;
+  d.innerHTML = df === 0 ? '<span class="pos">✔ 與系統相同</span>' :
+    '差額 <span class="' + (df > 0 ? "pos" : "neg") + '">' + (df > 0 ? "+" : "") + df + '</span>（東邑 ' + curStock + ' → ' + v + '）';
+}
+function submitCount() {
+  var v = parseInt($("cnt").value, 10);
+  if (!cur || isNaN(v) || v < 0) { toast("請輸入盤點數量"); return; }
+  var df = v - curStock;
+  if (Math.abs(df) >= 20 && !confirm("差額 " + df + " 件，確定沒有打錯？")) return;
+  $("sendBtn").disabled = true;
+  var it = cur;
+  rpc("submit_stocktake", { p_pin: pin, p_part_id: it.id, p_part_name: it.name, p_barcode: it.barcode || "", p_system_stock: curStock, p_counted: v, p_counter: who })
+    .then(function (id) {
+      hist.unshift({ id: id, part_name: it.name, barcode: it.barcode, system_stock: curStock, counted: v, diff: df, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
+      renderHist(); toast("已送出：" + it.name); closeDetail();
+    })
+    .catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
+    .then(function () { $("sendBtn").disabled = false; });
+}
+
+// ---------- 紀錄 ----------
+function loadHist() {
+  var d = new Date(); d.setHours(0, 0, 0, 0);
+  api("/rest/v1/stocktake?select=*&created_at=gte." + encodeURIComponent(d.toISOString()) + "&order=id.desc&limit=200")
+    .then(function (r) { hist = r || []; renderHist(); }).catch(function () {});
+}
+function renderHist() {
+  if (!hist.length) { $("hist").innerHTML = '<div class="empty">還沒有紀錄</div>'; return; }
+  $("hist").innerHTML = hist.map(function (h) {
+    var tag = h.status === "applied" ? '<span class="tag t-applied">✔ 已寫回 ' + h.stock_after + '</span>' :
+              h.status === "error" ? '<span class="tag t-error" title="' + esc(h.error) + '">✖ ' + esc(h.error || "失敗") + '</span>' :
+              '<span class="tag t-pending">' + (h._t && Date.now() - h._t > 30000 ? "⚠ 等待中（盤點服務沒開？）" : "寫回中…") + '</span>';
+    var df = h.counted - h.system_stock;
+    return '<div class="h"><span class="n">' + esc(h.part_name) + '</span><span>' + h.counted +
+      ' <small class="' + (df > 0 ? "pos" : df < 0 ? "neg" : "") + '">(' + (df > 0 ? "+" : "") + df + ')</small></span>' + tag + '</div>';
+  }).join("");
+}
+function pollPending() {
+  var ids = hist.filter(function (h) { return h.status === "pending"; }).map(function (h) { return h.id; });
+  if (!ids.length) return;
+  api("/rest/v1/stocktake?select=id,status,stock_after,error&id=in.(" + ids.join(",") + ")").then(function (r) {
+    var ch = false;
+    (r || []).forEach(function (x) {
+      hist.forEach(function (h) {
+        if (h.id === x.id && x.status !== "pending") {
+          h.status = x.status; h.stock_after = x.stock_after; h.error = x.error; ch = true;
+          items.forEach(function (it) { if (it.name === h.part_name && x.stock_after != null) it.stock = x.stock_after; });
+        }
+      });
+    });
+    renderHist();
+  }).catch(function () {});
+}
+
+// ---------- 相機 ----------
+function toggleCam() { scanner ? stopCam() : startCam(); }
+function startCam() {
+  if (!window.Html5Qrcode) { toast("掃描元件載入失敗"); return; }
+  $("reader").style.display = "block"; $("camBtn").textContent = "✕ 關閉";
+  var F = Html5QrcodeSupportedFormats;
+  scanner = new Html5Qrcode("reader", { formatsToSupport: [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.ITF, F.QR_CODE], verbose: false });
+  scanner.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 300, height: 120 } },
+    function (txt) { if (navigator.vibrate) navigator.vibrate(80); stopCam(); $("q").value = txt; search(txt); },
+    function () {}).catch(function (e) { toast("無法開啟相機：" + e, 4000); stopCam(); });
+}
+function stopCam() {
+  if (scanner) { var s = scanner; scanner = null; s.stop().catch(function () {}).then(function () { try { s.clear(); } catch (e) {} }); }
+  $("reader").style.display = "none"; $("camBtn").textContent = "📷 掃描";
+}
+
+// ---------- 啟動 ----------
+$("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { search(this.value); } });
+$("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2 && !/^[0-9A-Z\-]{8,}$/i.test(v)) search(v); });
+$("cnt").addEventListener("input", showDiff);
+$("cnt").addEventListener("keydown", function (e) { if (e.key === "Enter") submitCount(); });
+document.addEventListener("visibilitychange", function () { if (!document.hidden && pin) loadHist(); });
+
+(function () {
+  var p = load("st_pin"), n = load("st_who");
+  if (n) $("lgName").value = n;
+  if (p && n) {
+    rpc("check_stocktake_pin", { p_pin: p }).then(function (ok) { if (ok) { pin = p; who = n; start(); } else { $("login").style.display = "block"; } })
+      .catch(function () { $("login").style.display = "block"; });
+  } else $("login").style.display = "block";
+})();
+</script>
+</body>
+</html>
