@@ -144,6 +144,20 @@ function rpc(fn, body) { return api("/rest/v1/rpc/" + fn, { method: "POST", body
 // ---------- 條碼正規化（與入庫程式相同規則） ----------
 var PGO = /^(A[0-9FR]|B[AF]|C[0-9]|J[0-9DR]|M2|P[0-9]|XC|ES|F7)/;
 function key(s) { return String(s || "").toUpperCase().replace(/[\s\-]/g, ""); }
+// 紅外線／相機掃出的無 - 料號 → 正確格式（與入庫程式、條碼轉換 AHK 相同規則）
+function toProper(raw) {
+  var b = key(raw);
+  if (!b || /-/.test(String(raw)) || PGO.test(b)) return String(raw || "").trim().toUpperCase();
+  if (/^[0-9B][0-9A-Z]{7}[0-9]{2}$/.test(b) && !/^\d{10}$/.test(b) && !/^B\d\dN/.test(b)) return b.substr(0, 3) + "-" + b.substr(3, 5) + "-" + b.substr(8, 2);
+  if (/^[0-9A-Z]{12}$/.test(b)) {
+    if (/^9[0-9A-Z]{2}[0-9][0-9A-Z]{6}00$/.test(b)) return b.substr(0, 5) + "-" + b.substr(5, 5);
+    if (/^\d{5}/.test(b)) return b;
+    var base = b.substr(0, 3) + "-" + b.substr(3, 5) + "-" + b.substr(8, 2), c = b.substr(10, 2);
+    return c === "00" ? base : base + "-" + c;
+  }
+  return String(raw).trim().toUpperCase();
+}
+function looksLikeCode(s) { return /^[0-9A-Z\-]{8,}$/i.test(String(s || "").trim()); }
 
 // ---------- 登入 ----------
 function login() {
@@ -189,16 +203,18 @@ function addIdx(k, it) { (byKey[k] = byKey[k] || []).indexOf(it) < 0 && byKey[k]
 
 function search(raw) {
   raw = String(raw || "").trim(); if (!raw) { $("res").innerHTML = ""; return; }
-  var k = key(raw), hits = byKey[k] || [];
+  var conv = looksLikeCode(raw) ? toProper(raw) : raw;
+  if (conv !== raw.toUpperCase()) { $("q").value = conv; camMsg("已轉換：" + raw.toUpperCase() + " → " + conv); } else if (looksLikeCode(raw)) camMsg("");
+  var k = key(raw), kp = key(conv), hits = byKey[kp] || byKey[k] || [];
   if (!hits.length && k.length === 12) hits = byKey[k.substr(0, 10)] || [];
   if (hits.length === 1) { openItem(hits[0]); return; }
   if (!hits.length) {
     var toks = raw.toUpperCase().split(/\s+/).filter(Boolean);
     hits = items.filter(function (it) { return toks.every(function (t) { return it._s.indexOf(t) >= 0 || key(it._s).indexOf(key(t)) >= 0; }); }).slice(0, 60);
   }
-  if (!hits.length) { $("res").innerHTML = '<div class="empty">找不到「' + esc(raw) + '」</div>'; return; }
+  if (!hits.length) { $("res").innerHTML = '<div class="empty">找不到「' + esc(conv) + '」' + (conv !== raw.toUpperCase() ? '（掃到 ' + esc(raw) + '）' : '') + '<br>可改用名稱關鍵字搜尋</div>'; return; }
   $("res").innerHTML = hits.map(function (it) {
-    return '<div class="it" onclick="openById(' + it.id + ')"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(it.barcode || "（無料號）") +
+    return '<div class="it" onclick="openById(' + it.id + ')"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(it.barcode && looksLikeCode(it.barcode) ? toProper(it.barcode) : (it.barcode || "（無料號）")) +
       '</span></div><div class="s">' + it.stock + '</div></div>';
   }).join("");
 }
@@ -207,7 +223,8 @@ function openById(id) { for (var i = 0; i < items.length; i++) if (items[i].id =
 // ---------- 盤點 ----------
 function openItem(it) {
   cur = it; stopCam();
-  $("dName").textContent = it.name; $("dCode").textContent = (it.barcode || "（無料號）") + "　編號 " + it.id;
+  $("dName").textContent = it.name; var pc = it.barcode && looksLikeCode(it.barcode) ? toProper(it.barcode) : it.barcode;
+  $("dCode").innerHTML = esc(pc || "（無料號）") + "　編號 " + it.id + (pc && pc !== String(it.barcode).toUpperCase() ? '<br><small style="color:var(--warn)">東邑存成 ' + esc(it.barcode) + '（今晚批次修正會改正）</small>' : "");
   $("dStock").textContent = it.stock; curStock = it.stock; $("cnt").value = ""; showDiff();
   $("detail").style.display = "block"; $("res").innerHTML = ""; $("q").value = "";
   $("detail").scrollIntoView({ behavior: "smooth" });
