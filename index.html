@@ -86,8 +86,12 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
       <div class="searchrow">
         <input id="q" placeholder="掃描／輸入料號或名稱" autocomplete="off" enterkeyhint="search">
         <button class="btn cam" id="camBtn" onclick="toggleCam()">📷 掃描</button>
+        <button class="btn cam" style="background:#7c3aed" onclick="$('photo').click()">📸 拍照</button>
+        <input type="file" id="photo" accept="image/*" capture="environment" style="display:none">
       </div>
+      <div id="inapp" class="meta" style="display:none;color:var(--bad);font-weight:700"></div>
       <div id="reader"></div>
+      <div class="meta" id="camMsg"></div>
       <div class="meta" id="meta">讀取材料庫中…</div>
       <div class="res" id="res"></div>
     </div>
@@ -274,21 +278,52 @@ function pollPending() {
 
 // ---------- 相機 ----------
 function toggleCam() { scanner ? stopCam() : startCam(); }
+var FMTS = null;
+function fmts() { var F = Html5QrcodeSupportedFormats; return [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.QR_CODE]; }
+function camMsg(t) { $("camMsg").textContent = t || ""; }
 function startCam() {
-  if (!window.Html5Qrcode) { toast("掃描元件載入失敗"); return; }
+  if (!window.Html5Qrcode) { toast("掃描元件載入失敗，請檢查網路"); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMsg("這個瀏覽器不支援即時相機，請改用「📸 拍照」或換 Chrome / Safari 開啟"); return; }
   $("reader").style.display = "block"; $("camBtn").textContent = "✕ 關閉";
-  var F = Html5QrcodeSupportedFormats;
-  scanner = new Html5Qrcode("reader", { formatsToSupport: [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.ITF, F.QR_CODE], verbose: false });
-  scanner.start({ facingMode: "environment" }, { fps: 12, qrbox: { width: 300, height: 120 } },
-    function (txt) { if (navigator.vibrate) navigator.vibrate(80); stopCam(); $("q").value = txt; search(txt); },
-    function () {}).catch(function (e) { toast("無法開啟相機：" + e, 4000); stopCam(); });
+  camMsg("開啟相機中…條碼請放在框內、保持 10～20 公分、光線充足");
+  scanner = new Html5Qrcode("reader", { formatsToSupport: fmts(), verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+  var cfg = { fps: 15, aspectRatio: 1.7778, disableFlip: true,
+    qrbox: function (w, h) { return { width: Math.floor(w * 0.9), height: Math.max(80, Math.floor(h * 0.45)) }; },
+    videoConstraints: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] } };
+  scanner.start({ facingMode: "environment" }, cfg,
+    function (txt) { if (navigator.vibrate) navigator.vibrate(80); stopCam(); camMsg(""); $("q").value = txt; search(txt); },
+    function () {})
+  .then(function () { camMsg("相機已開啟，對準條碼（掃不到可改用「📸 拍照」）"); })
+  .catch(function (e) {
+    var m = String(e && (e.name || e.message) || e);
+    camMsg(/NotAllowed|Permission/i.test(m) ? "相機權限被拒絕：請到瀏覽器設定允許此網站使用相機" :
+           /NotFound|DevicesNotFound/i.test(m) ? "找不到相機" : /NotReadable|TrackStart/i.test(m) ? "相機被其他程式占用，請關掉其他相機 App" :
+           /secure|https/i.test(m) ? "需要 https 才能開相機" : "無法開啟相機：" + m);
+    stopCam(true);
+  });
 }
-function stopCam() {
-  if (scanner) { var s = scanner; scanner = null; s.stop().catch(function () {}).then(function () { try { s.clear(); } catch (e) {} }); }
+function scanPhoto(file) {
+  if (!file) return;
+  if (!window.Html5Qrcode) { toast("掃描元件載入失敗"); return; }
+  camMsg("辨識照片中…");
+  var tmp = new Html5Qrcode("reader", { formatsToSupport: fmts(), verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+  tmp.scanFile(file, false).then(function (txt) { camMsg(""); $("q").value = txt; search(txt); })
+    .catch(function () { camMsg("照片裡找不到條碼：請靠近一點、條碼橫放、拍清楚再試"); })
+    .then(function () { try { tmp.clear(); } catch (e) {} $("photo").value = ""; });
+}
+function stopCam(keepMsg) {
+  if (scanner) { var s = scanner; scanner = null;
+    try { var p = s.stop(); if (p && p.then) p.catch(function () {}).then(function () { try { s.clear(); } catch (e) {} }); else s.clear(); } catch (e) { try { s.clear(); } catch (e2) {} } }
   $("reader").style.display = "none"; $("camBtn").textContent = "📷 掃描";
 }
 
 // ---------- 啟動 ----------
+$("photo").addEventListener("change", function () { scanPhoto(this.files && this.files[0]); });
+(function () { var ua = navigator.userAgent;
+  if (/Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua)) { var e = $("inapp"); e.style.display = "block";
+    e.textContent = "⚠ 你正在 LINE／FB 內建瀏覽器，相機常常不能用。請按右上角「⋯」→ 用 Chrome 或 Safari 開啟"; }
+  if (!window.isSecureContext) camMsg("目前不是 https 連線，相機無法使用");
+})();
 $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { search(this.value); } });
 $("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2 && !/^[0-9A-Z\-]{8,}$/i.test(v)) search(v); });
 $("cnt").addEventListener("input", showDiff);
