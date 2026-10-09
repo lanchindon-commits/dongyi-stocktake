@@ -58,6 +58,21 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .li .sub input { width: 80px; padding: 5px; font-size: 1rem; border: 1px solid var(--line); border-radius: 6px; }
 .li .del { margin-left: auto; background: #fee2e2; color: var(--bad); border: 0; border-radius: 8px; padding: 6px 12px; font-weight: 700; }
 .neg { color: var(--bad); font-weight: 700; } .pos { color: var(--ok); }
+.prices { grid-column: 1 / 3; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pbox { border: 1px solid var(--line); border-radius: 10px; padding: 7px 9px; background: #f8fafc; min-width: 0; }
+.pbox label { display: block; font-size: .78rem; color: var(--mute); margin-bottom: 3px; }
+.pbox .v { font-size: 1.15rem; font-weight: 700; color: var(--mute); }
+.pbox .lastinfo { font-size: .72rem; color: var(--mute); margin-top: 2px; line-height: 1.3; }
+.pbox input { width: 100%; font-size: 1.15rem; font-weight: 800; padding: 4px 6px; border: 2px solid var(--line); border-radius: 8px; }
+.pbox input::-webkit-outer-spin-button, .pbox input::-webkit-inner-spin-button, .li input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pbox input, .li .ctl input { -moz-appearance: textfield; }
+.pbox.chg { background: #fff7ed; border-color: #fdba74; } .pbox.chg input { border-color: #f97316; }
+.flag { font-size: .78rem; font-weight: 700; margin-top: 3px; min-height: 16px; }
+.up { color: var(--bad); } .down { color: var(--ok); }
+.margin { font-size: .78rem; color: var(--mute); margin-top: 3px; } .margin.low { color: var(--bad); font-weight: 700; }
+.alert { grid-column: 1 / 3; font-size: .88rem; border-radius: 8px; padding: 6px 10px; display: none; }
+.alert.warn { display: block; background: #fff7ed; color: #9a3412; } .alert.bad { display: block; background: #fee2e2; color: #991b1b; }
+@media (max-width: 520px) { .prices { grid-template-columns: 1fr 1fr; } .pbox.last { grid-column: 1 / 3; } }
 .bar { display: flex; gap: 10px; align-items: center; position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .bar .sum { flex: 1; font-weight: 700; }
 .bar .btn { padding: 16px 22px; font-size: 1.15rem; }
@@ -299,7 +314,7 @@ function loadItems() {
   items = []; byKey = {};
   var page = 0, size = 1000;
   function next() {
-    return api("/rest/v1/inventory?select=id,name,barcode,stock,in_price,default_price,applicably,updated_at&active=eq.true&order=id", { headers: { Range: (page * size) + "-" + (page * size + size - 1) } })
+    return api("/rest/v1/inventory?select=id,name,barcode,stock,in_price,default_price,applicably,updated_at,last_in_date,last_in_supplier,last_in_price&active=eq.true&order=id", { headers: { Range: (page * size) + "-" + (page * size + size - 1) } })
       .then(function (rows) { items = items.concat(rows || []); if (rows && rows.length === size) { page++; return next(); } });
   }
   next().then(function () {
@@ -307,7 +322,7 @@ function loadItems() {
     items.forEach(function (it) { indexItem(it); if (it.updated_at > last) last = it.updated_at; });
     $("meta").textContent = "材料庫 " + items.length + " 筆・最後同步 " + (last ? new Date(last).toLocaleString("zh-TW", { hour12: false }) : "-");
     // 清單裡的材料換成最新資料
-    ["in", "out"].forEach(function (m) { lists[m].forEach(function (L) { var it = findId(L.id); if (it) L.stock = it.stock; }); });
+    ["in", "out"].forEach(function (m) { lists[m].forEach(function (L) { var it = findId(L.id); if (it) { L.stock = it.stock; if (m === "in" && L.lastIn == null) fillPrice(L, it); } }); });
     renderList();
   }).catch(function (e) { $("meta").textContent = "材料庫讀取失敗：" + e.message; });
 }
@@ -379,9 +394,42 @@ function saveLists() { store("st_lists", JSON.stringify(lists)); }
 function addToList(it) {
   var L = lists[mode];
   for (var i = 0; i < L.length; i++) if (L[i].id === it.id) { L[i].qty++; saveLists(); renderList(i); buzz(true); toast("＋1　" + it.name + "（共 " + L[i].qty + "）"); return; }
-  L.push({ id: it.id, name: it.name, barcode: it.barcode || "", fix: needsFix(it), stock: it.stock, qty: 1,
-           price: mode === "in" ? (it.in_price || 0) : (it.default_price || 0) });
+  var row = { id: it.id, name: it.name, barcode: it.barcode || "", fix: needsFix(it), stock: it.stock, qty: 1,
+           price: mode === "in" ? (it.in_price || 0) : (it.default_price || 0) };
+  if (mode === "in") fillPrice(row, it);
+  L.push(row);
   saveLists(); renderList(L.length - 1); buzz(true); toast("已加入　" + it.name);
+}
+var MIN_MARGIN = 20;   // 毛利率低於 20% 提醒
+function fillPrice(x, it) {
+  x.lastIn = it.in_price || 0; x.lastOut = it.default_price || 0;
+  if (x.outP == null) x.outP = x.lastOut;
+  x.lastDate = it.last_in_date || ""; x.lastSup = it.last_in_supplier || ""; x.lastP = it.last_in_price;
+}
+function pct(a, b) { return b ? Math.round((a - b) / b * 1000) / 10 : 0; }
+function priceHtml(x, i) {
+  var info = x.lastDate ? esc(x.lastDate) + " " + esc(x.lastSup || "（未記廠商）") + (x.lastP != null ? " @" + x.lastP : "") : "沒有進貨紀錄";
+  return '<div class="prices">' +
+    '<div class="pbox last"><label>上次進價</label><div class="v">' + x.lastIn + '</div><div class="lastinfo">上次進貨：' + info + '</div></div>' +
+    '<div class="pbox" id="pbIn' + i + '"><label>本次進價</label><input type="number" inputmode="numeric" value="' + x.price + '" oninput="setP(' + i + ',this.value)"><div class="flag" id="flIn' + i + '"></div></div>' +
+    '<div class="pbox" id="pbOut' + i + '"><label id="lbOut' + i + '">售價</label><input type="number" inputmode="numeric" value="' + x.outP + '" oninput="setO(' + i + ',this.value)"><div class="margin" id="mg' + i + '"></div></div>' +
+    '</div><div class="alert" id="al' + i + '"></div>';
+}
+function updPrices(i) {
+  var x = lists.in[i]; if (!x || !$("pbIn" + i)) return;
+  var inChg = x.price !== x.lastIn, outChg = x.outP !== x.lastOut, d = pct(x.price, x.lastIn);
+  $("pbIn" + i).classList.toggle("chg", inChg);
+  $("flIn" + i).className = "flag " + (x.price > x.lastIn ? "up" : "down");
+  $("flIn" + i).textContent = inChg ? (x.price > x.lastIn ? "▲ 漲 " : "▼ 降 ") + Math.abs(x.price - x.lastIn) + " 元" + (x.lastIn ? "（" + (d > 0 ? "+" : "") + d + "%）" : "") : "";
+  $("pbOut" + i).classList.toggle("chg", outChg);
+  $("lbOut" + i).textContent = "售價" + (outChg ? "（原 " + x.lastOut + "）" : "");
+  var m = x.outP ? Math.round((x.outP - x.price) / x.outP * 100) : null;
+  $("mg" + i).className = "margin" + (m != null && m < MIN_MARGIN ? " low" : "");
+  $("mg" + i).textContent = "毛利 " + (m == null ? "-" : m + "%") + (m != null && m < MIN_MARGIN ? "（低於 " + MIN_MARGIN + "%）" : "");
+  var al = $("al" + i);
+  if (x.outP && x.price >= x.outP) { al.className = "alert bad"; al.textContent = "⚠ 進價 " + x.price + " 已經高於或等於售價 " + x.outP + "，賣一個會虧錢，要不要調售價？"; }
+  else if (inChg && x.price > x.lastIn && !outChg && x.lastIn) { al.className = "alert warn"; al.textContent = "進價漲了 " + d + "%，售價還是 " + x.outP + "，要不要一起調？"; }
+  else { al.className = "alert"; al.textContent = ""; }
 }
 function renderList(flash) {
   if (mode === "count") return;
@@ -393,14 +441,16 @@ function renderList(flash) {
       (x.fix ? ' <span class="fx">（東邑存成 ' + esc(x.barcode) + '，送出時改正）</span>' : "") + '</small></div>' +
       '<div class="ctl"><button onclick="bumpQ(' + i + ',-1)">−</button><input type="number" inputmode="numeric" value="' + x.qty + '" onchange="setQ(' + i + ',this.value)"><button onclick="bumpQ(' + i + ',1)">＋</button></div>' +
       '<div class="sub"><span>庫存 ' + x.stock + ' → <b class="' + (after < 0 ? "neg" : "") + '">' + after + '</b></span>' +
-      (mode === "in" || $("otT").checked ? '<span>' + (mode === "in" ? "進價" : "售價") + ' <input type="number" inputmode="numeric" value="' + x.price + '" onchange="setP(' + i + ',this.value)"></span>' : "") +
-      '<button class="del" onclick="delRow(' + i + ')">刪除</button></div></div>';
+      (mode !== "in" && $("otT").checked ? '<span>售價 <input type="number" inputmode="numeric" value="' + x.price + '" onchange="setP(' + i + ',this.value)"></span>' : "") +
+      '<button class="del" onclick="delRow(' + i + ')">刪除</button></div>' + (mode === "in" ? priceHtml(x, i) : "") + '</div>';
   }).join("");
   $("sum").textContent = "共 " + L.length + " 項、" + tq + " 件";
+  if (mode === "in") L.forEach(function (x, i) { updPrices(i); });
 }
 function bumpQ(i, n) { var x = lists[mode][i]; x.qty = Math.max(1, x.qty + n); saveLists(); renderList(); }
 function setQ(i, v) { var n = parseInt(v, 10); lists[mode][i].qty = isNaN(n) || n < 1 ? 1 : n; saveLists(); renderList(); }
-function setP(i, v) { var n = parseInt(v, 10); lists[mode][i].price = isNaN(n) ? 0 : n; saveLists(); }
+function setP(i, v) { var n = parseInt(v, 10); lists[mode][i].price = isNaN(n) ? 0 : n; saveLists(); if (mode === "in") updPrices(i); }
+function setO(i, v) { var n = parseInt(v, 10); lists.in[i].outP = isNaN(n) ? 0 : n; saveLists(); updPrices(i); }
 function delRow(i) { lists[mode].splice(i, 1); saveLists(); renderList(); }
 function clearList() { if (lists[mode].length && !confirm("確定清空清單？")) return; lists[mode] = []; saveLists(); renderList(); }
 
@@ -412,12 +462,17 @@ function submitList() {
   var label = isIn ? "入庫" : (isT ? "出庫（調撥）" : "出庫（內部）");
   var tq = 0, negs = [];
   L.forEach(function (x) { tq += x.qty; if (!isIn && x.stock - x.qty < 0) negs.push(x.name); });
+  var chg = isIn ? L.filter(function (x) { return x.price !== x.lastIn || x.outP !== x.lastOut; }).map(function (x) {
+    return "・" + x.name + "\n　" + (x.price !== x.lastIn ? "進價 " + x.lastIn + " → " + x.price + "　" : "") + (x.outP !== x.lastOut ? "售價 " + x.lastOut + " → " + x.outP : "");
+  }) : [];
   if (!confirm(label + "　" + L.length + " 項、共 " + tq + " 件\n經手人：" + who + (partner ? "\n對象：" + partner : "") +
+      (chg.length ? "\n\n以下價格會一起更新到東邑：\n" + chg.join("\n") : "") +
       (negs.length ? "\n\n⚠ 扣完會變負庫存：\n" + negs.join("\n") : "") + "\n\n確定送出並寫回東邑？")) return;
   store(isIn ? "st_supplier" : "st_store", isIn ? $("supplier").value : $("store").value);
   $("sendBtn").disabled = true;
   var moves = L.map(function (x) {
-    return { kind: kind, part_id: x.id, part_name: x.name, barcode: x.barcode, fix_barcode: x.fix || "", qty: x.qty, price: kind === "out_internal" ? 0 : x.price, partner: partner, man: who };
+    return { kind: kind, part_id: x.id, part_name: x.name, barcode: x.barcode, fix_barcode: x.fix || "", qty: x.qty, price: kind === "out_internal" ? 0 : x.price, partner: partner, man: who,
+             extra: isIn && x.outP !== x.lastOut && x.outP > 0 ? { out_price: x.outP } : null };
   });
   rpc("submit_moves", { p_pin: pin, p_moves: moves }).then(function (ids) {
     var now = new Date().toISOString();
