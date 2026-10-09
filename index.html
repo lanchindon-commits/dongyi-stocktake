@@ -104,6 +104,7 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
 .dlg h2 { font-size: 1.2rem; margin-bottom: 12px; }
 .dlg .row label.l { width: 80px; }
 .dlg .row input.txt, .dlg .row select { flex: 1; }
+#nAppSel { flex: 1; } #nApp { flex: 1 1 100%; }
 .pick { padding: 12px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
 .hide { display: none !important; }
 </style>
@@ -212,7 +213,7 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
   <div class="row"><label class="l">進價</label><input class="txt" id="nIn" type="number" inputmode="numeric" value="0"></div>
   <div class="row"><label class="l">售價</label><input class="txt" id="nOut" type="number" inputmode="numeric" value="0"></div>
   <div class="row"><label class="l">安全庫存</label><input class="txt" id="nSafe" type="number" inputmode="numeric" value="0"></div>
-  <div class="row"><label class="l">適用</label><input class="txt" id="nApp" maxlength="20" placeholder="例：山葉、光陽（可空白）"></div>
+  <div class="row"><label class="l">適用</label><select id="nAppSel" onchange="appSel()"><option value="">（不指定）</option><option>山葉</option><option>光陽</option><option>三陽</option><option>台鈴</option><option value="__other">其他（自己填）</option></select><input class="txt" id="nApp" maxlength="20" placeholder="輸入品牌" style="display:none"></div>
   <div class="meta" id="nMsg">建立後會寫入東邑材料庫（庫存 0），再加入清單。</div>
   <div class="actions" style="margin-top:12px">
     <button class="btn gray" onclick="closeDlg()">取消</button>
@@ -484,9 +485,22 @@ function submitList() {
 }
 
 // ---------- 新增材料 ----------
+// 適用品牌：下拉選單 + 其他自己填；依料號格式自動猜品牌
+function guessBrand(code) {
+  var c = String(code || "").toUpperCase();
+  if (/^[0-9A-Z]{3}-[0-9A-Z]{5}-[0-9A-Z]{2}(-[0-9A-Z]{2})?$/.test(c) || /^9[0-9A-Z]{4}-[0-9A-Z]{5}$/.test(c)) return "山葉";
+  if (/^\d{5}-[0-9A-Z]{4}-[0-9A-Z]{3}/.test(c)) return "光陽";
+  if (/^\d{5}-[0-9A-Z]{3}-[0-9A-Z]{3}/.test(c)) return "三陽";
+  if (/^\d{5}[A-Z]\d{2}[A-Z]/.test(c)) return "台鈴";
+  return "";
+}
+function appSel() { var o = document.getElementById("nAppSel").value === "__other"; document.getElementById("nApp").style.display = o ? "" : "none"; if (o) document.getElementById("nApp").focus(); }
+function setApp(code) { var s = document.getElementById("nAppSel"); s.value = guessBrand(code); document.getElementById("nApp").value = ""; appSel(); }
+function getApp() { var s = document.getElementById("nAppSel").value; return s === "__other" ? String(document.getElementById("nApp").value).replace(/^\s+|\s+$/g, "") : s; }
+
 var pendingNew = null;
 function showNew(code, name) {
-  $("nCode").value = code || ""; $("nName").value = name || ""; $("nIn").value = "0"; $("nOut").value = "0"; $("nSafe").value = "0"; $("nApp").value = "";
+  $("nCode").value = code || ""; $("nName").value = name || ""; $("nIn").value = "0"; $("nOut").value = "0"; $("nSafe").value = "0"; setApp(code);
   $("nMsg").textContent = "建立後會寫入東邑材料庫（庫存 0），再加入清單。"; $("nBtn").disabled = false;
   $("mNew").classList.add("on"); setTimeout(function () { (code ? $("nName") : $("nCode")).focus(); }, 200);
 }
@@ -495,7 +509,7 @@ function createItem() {
   if (!name) { $("nMsg").textContent = "請輸入項目名稱"; return; }
   if (code && (byKey[key(code)] || []).length) { $("nMsg").textContent = "這個料號已經在材料庫裡"; return; }
   $("nBtn").disabled = true; $("nMsg").textContent = "建立中，等東邑寫入（約 5 秒）…";
-  var extra = { category: $("nCat").value, in_price: +$("nIn").value || 0, out_price: +$("nOut").value || 0, safe_stock: +$("nSafe").value || 0, applicably: $("nApp").value.trim() };
+  var extra = { category: $("nCat").value, in_price: +$("nIn").value || 0, out_price: +$("nOut").value || 0, safe_stock: +$("nSafe").value || 0, applicably: getApp() };
   rpc("submit_moves", { p_pin: pin, p_moves: [{ kind: "new", part_name: name, barcode: code, partner: mode === "in" ? $("supplier").value : "", man: who, extra: extra }] })
     .then(function (ids) { pendingNew = { id: ids[0], name: name, barcode: code, extra: extra, mode: mode, t: Date.now() }; })
     .catch(function (e) { $("nMsg").textContent = "建立失敗：" + e.message; $("nBtn").disabled = false; });
