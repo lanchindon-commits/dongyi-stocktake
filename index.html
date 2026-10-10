@@ -256,7 +256,7 @@ function api(path, opt) {
 function rpc(fn, body) { return api("/rest/v1/rpc/" + fn, { method: "POST", body: body }); }
 
 // ---------- 條碼正規化（與入庫程式、條碼轉換 AHK 相同規則） ----------
-var PGO = /^(A[0-9FR]|B[AF]|C[0-9]|J[0-9DR]|M2|P[0-9]|XC|ES|F7)/;
+var PGO = /^(A[0-9FR]|B[AF][0-9]|C[0-9]|J[0-9DR]|M2|P[0-9]|XC|ES|F7)/;
 function key(s) { return String(s || "").toUpperCase().replace(/[\s\-]/g, ""); }
 function toProper(raw) {
   var b = key(raw);
