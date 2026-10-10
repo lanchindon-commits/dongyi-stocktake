@@ -39,7 +39,13 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .btn.gray { background: #94a3b8; } .btn.ok { background: var(--ok); } .btn.mode { background: var(--mode); }
 .btn:disabled { opacity: .5; }
 .meta { color: var(--mute); font-size: .85rem; margin-top: 8px; }
-#reader { margin-top: 12px; display: none; border-radius: 12px; overflow: hidden; }
+#camWrap { position: relative; margin-top: 12px; display: none; }
+#reader { border-radius: 12px; overflow: hidden; }
+/* 掃描框中間的紅色雷射線，對準條碼用 */
+#laser { position: absolute; left: 9%; right: 9%; top: 50%; height: 2px; background: rgba(239,68,68,.9); box-shadow: 0 0 6px rgba(239,68,68,.9); pointer-events: none; z-index: 6; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .35; } }
+#zoomRow { display: none; align-items: center; gap: 8px; margin-top: 8px; color: var(--mute); font-size: .9rem; }
+#zoomRow input { flex: 1; }
 .res .it { padding: 12px 4px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: center; }
 .res .it .n { flex: 1; min-width: 0; }
 .res .it .n b { display: block; font-size: 1rem; }
@@ -155,7 +161,8 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
         <input type="file" id="photo" accept="image/*" capture="environment" style="display:none">
       </div>
       <div id="inapp" class="meta" style="display:none;color:var(--bad);font-weight:700"></div>
-      <div id="reader"></div>
+      <div id="camWrap"><div id="reader"></div><div id="laser"></div></div>
+      <div id="zoomRow">🔍 放大 <input type="range" id="zoom" min="1" max="3" step="0.1" value="1"> <span id="zoomV">1x</span></div>
       <div class="meta" id="camMsg"></div>
       <div class="meta" id="meta">讀取材料庫中…</div>
       <div class="res" id="res"></div>
@@ -630,17 +637,27 @@ function closeDlg() { $("mPick").classList.remove("on"); $("mNew").classList.rem
 function camMsg(t) { $("camMsg").textContent = t || ""; }
 function fmts() { var F = Html5QrcodeSupportedFormats; return [F.CODE_128, F.CODE_39, F.CODE_93, F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.ITF, F.CODABAR, F.QR_CODE]; }
 function toggleCam() { scanner ? stopCam() : startCam(); }
+var lastRead = "", lastReadT = 0;
 function startCam() {
   if (!window.Html5Qrcode) { toast("掃描元件載入失敗，請檢查網路"); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMsg("這個瀏覽器不支援即時相機，請改用 📸 拍照，或用 Chrome / Safari 開啟"); return; }
-  $("reader").style.display = "block"; $("camBtn").textContent = "✕";
-  camMsg("開啟相機中…條碼放在框內、距離 10～20 公分");
+  $("camWrap").style.display = "block"; $("camBtn").textContent = "✕"; lastRead = "";
+  camMsg("開啟相機中…");
   scanner = new Html5Qrcode("reader", { formatsToSupport: fmts(), verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
-  scanner.start({ facingMode: "environment" }, { fps: 15, aspectRatio: 1.7778, disableFlip: true,
-      qrbox: function (w, h) { return { width: Math.floor(w * 0.9), height: Math.max(80, Math.floor(h * 0.45)) }; },
+  scanner.start({ facingMode: "environment" }, { fps: 20, aspectRatio: 1.7778, disableFlip: true,
+      // 長條形掃描框：寬 85%、高約寬度的 1/4（符合條碼形狀）
+      qrbox: function (w, h) { var bw = Math.floor(w * 0.85); return { width: bw, height: Math.max(56, Math.min(130, Math.floor(bw * 0.25))) }; },
       videoConstraints: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] } },
-    function (txt) { stopCam(); search(txt); }, function () {})
-  .then(function () { camMsg("相機已開啟，對準條碼（掃不到可改用 📸 拍照）"); })
+    function (txt) {
+      // 連續兩次讀到同一個條碼才採用，避免誤讀
+      var now = Date.now();
+      if (txt !== lastRead || now - lastReadT > 1500) { lastRead = txt; lastReadT = now; camMsg("讀到 " + txt + "，保持不動確認中…"); return; }
+      buzz(true); stopCam(); search(txt);
+    }, function () {})
+  .then(function () {
+    camMsg("把條碼橫放對準紅線（掃不到可放大，或改用 📸 拍照）");
+    setupZoom();
+  })
   .catch(function (e) {
     var m = String(e && (e.name || e.message) || e);
     camMsg(/NotAllowed|Permission/i.test(m) ? "相機權限被拒絕：請到瀏覽器設定允許這個網站使用相機" : /NotFound/i.test(m) ? "找不到相機" :
@@ -648,10 +665,23 @@ function startCam() {
     stopCam();
   });
 }
+function setupZoom() {
+  var caps = null;
+  try { caps = scanner && scanner.getRunningTrackCapabilities && scanner.getRunningTrackCapabilities(); } catch (e) {}
+  if (!caps || !caps.zoom || !(caps.zoom.max > 1)) { $("zoomRow").style.display = "none"; return; }
+  var z = $("zoom"), saved = parseFloat(load("st_zoom") || "0");
+  z.min = caps.zoom.min || 1; z.max = Math.min(caps.zoom.max, 5); z.step = caps.zoom.step || 0.1;
+  z.value = saved && saved >= z.min && saved <= z.max ? saved : Math.min(1.5, z.max);
+  $("zoomRow").style.display = "flex"; applyZoom();
+}
+function applyZoom() {
+  var v = parseFloat($("zoom").value); $("zoomV").textContent = v.toFixed(1) + "x"; store("st_zoom", String(v));
+  try { if (scanner) scanner.applyVideoConstraints({ advanced: [{ zoom: v }] }).catch(function () {}); } catch (e) {}
+}
 function stopCam() {
   if (scanner) { var s = scanner; scanner = null;
     try { var p = s.stop(); if (p && p.then) p.catch(function () {}).then(function () { try { s.clear(); } catch (e) {} }); else s.clear(); } catch (e) { try { s.clear(); } catch (e2) {} } }
-  $("reader").style.display = "none"; $("camBtn").textContent = "📷";
+  $("camWrap").style.display = "none"; $("zoomRow").style.display = "none"; $("camBtn").textContent = "📷";
 }
 function scanPhoto(file) {
   if (!file) return;
@@ -664,6 +694,7 @@ function scanPhoto(file) {
 }
 
 // ---------- 啟動 ----------
+$("zoom").addEventListener("input", applyZoom);
 $("photo").addEventListener("change", function () { scanPhoto(this.files && this.files[0]); });
 $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(this.value); } });
 $("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2 && !looksLikeCode(v)) search(v); else if (!v) $("res").innerHTML = ""; });
