@@ -39,8 +39,10 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .btn.gray { background: #94a3b8; } .btn.ok { background: var(--ok); } .btn.mode { background: var(--mode); }
 .btn:disabled { opacity: .5; }
 .meta { color: var(--mute); font-size: .85rem; margin-top: 8px; }
-#camWrap { position: relative; margin-top: 12px; display: none; }
-#reader { border-radius: 12px; overflow: hidden; }
+/* 相機預覽只顯示中間一條（寬:高 = 2:1），畫面置中裁切；掃描範圍不變 */
+#camWrap { position: relative; margin-top: 12px; display: none; overflow: hidden; border-radius: 12px; background: #000; aspect-ratio: 2 / 1; }
+#reader { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); }
+#camClose { position: absolute; right: 8px; top: 8px; z-index: 7; background: rgba(15,23,42,.75); color: #fff; border: 0; border-radius: 999px; padding: 7px 13px; font-size: .9rem; font-weight: 700; }
 /* 掃描框中間的紅色雷射線，對準條碼用 */
 #laser { position: absolute; left: 9%; right: 9%; top: 50%; height: 2px; background: rgba(239,68,68,.9); box-shadow: 0 0 6px rgba(239,68,68,.9); pointer-events: none; z-index: 6; animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .35; } }
@@ -161,7 +163,7 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
         <input type="file" id="photo" accept="image/*" capture="environment" style="display:none">
       </div>
       <div id="inapp" class="meta" style="display:none;color:var(--bad);font-weight:700"></div>
-      <div id="camWrap"><div id="reader"></div><div id="laser"></div></div>
+      <div id="camWrap"><div id="reader"></div><div id="laser"></div><button id="camClose" onclick="stopCam()">✕ 關閉相機</button></div>
       <div id="zoomRow">🔍 放大 <input type="range" id="zoom" min="1" max="3" step="0.1" value="1"> <span id="zoomV">1x</span></div>
       <div class="meta" id="camMsg"></div>
       <div class="meta" id="meta">讀取材料庫中…</div>
@@ -641,7 +643,8 @@ var lastRead = "", lastReadT = 0;
 function startCam() {
   if (!window.Html5Qrcode) { toast("掃描元件載入失敗，請檢查網路"); return; }
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { camMsg("這個瀏覽器不支援即時相機，請改用 📸 拍照，或用 Chrome / Safari 開啟"); return; }
-  $("camWrap").style.display = "block"; $("camBtn").textContent = "✕"; lastRead = "";
+  var cw = $("camWrap"); cw.style.display = "block"; cw.style.height = Math.round(cw.clientWidth / 2) + "px";  // 舊版瀏覽器不支援 aspect-ratio 時的保險
+  $("camBtn").textContent = "✕"; lastRead = "";
   camMsg("開啟相機中…");
   scanner = new Html5Qrcode("reader", { formatsToSupport: fmts(), verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
   scanner.start({ facingMode: "environment" }, { fps: 20, aspectRatio: 1.7778, disableFlip: true,
