@@ -84,6 +84,24 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .bar { display: flex; gap: 10px; align-items: center; position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
 .bar .sum { flex: 1; font-weight: 700; }
 .bar .btn { padding: 16px 22px; font-size: 1.15rem; }
+/* 盤點：關鍵字一次盤多筆 */
+.bc-head { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 2px solid var(--line); flex-wrap: wrap; }
+.bc-head .t { flex: 1; color: var(--mute); font-size: .9rem; }
+.bc-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+.bc-row.done { opacity: .5; }
+.bc-row .n { flex: 1; min-width: 0; } .bc-row .n b { display: block; font-size: 1rem; } .bc-row .n span { color: var(--mute); font-size: .82rem; }
+.bc-row .sys { min-width: 58px; text-align: right; color: var(--mute); font-size: .9rem; margin: 0; padding: 0; background: none; display: block; }
+.bc-row .sys b { font-size: 1.15rem; color: var(--ink); }
+.bc-row input { width: 74px; height: 44px; text-align: center; font-size: 1.25rem; font-weight: 800; border: 2px solid var(--line); border-radius: 10px; }
+.bc-row input.filled { border-color: var(--cnt); background: #eff6ff; }
+.bc-row .same { border: 0; background: #e2e8f0; border-radius: 8px; padding: 8px 9px; font-size: .85rem; font-weight: 700; color: var(--ink); white-space: nowrap; }
+.bc-row .df { width: 46px; text-align: center; font-size: .9rem; font-weight: 700; }
+@media (max-width: 560px) {
+  .bc-row { flex-wrap: wrap; gap: 6px 10px; }
+  .bc-row .n { flex: 1 1 100%; }
+  .bc-row .sys { text-align: left; min-width: 0; flex: 1; } .bc-row .sys br { display: none; } .bc-row .sys b { margin-left: 4px; }
+}
+.bc-row input::-webkit-inner-spin-button, .bc-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 /* 盤點 */
 .dname { font-size: 1.3rem; font-weight: 800; line-height: 1.35; }
 .dcode { color: var(--mute); margin-top: 4px; }
@@ -388,10 +406,80 @@ function search(raw) {
     $("res").innerHTML = '<div class="empty">找不到「' + esc(raw) + '」' + (mode !== "count" ? '<br><button class="btn ok" style="margin-top:8px" onclick="showNew(\'\', lastQ)">＋ 新增這個材料</button>' : "") + '</div>';
     return;
   }
+  if (mode === "count") { renderBatchCount(hits); return; }
   $("res").innerHTML = hits.map(function (it) {
     return '<div class="it" onclick="pickById(' + it.id + ')"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(properOf(it) || "（無料號）") +
       '</span></div><div class="s">' + it.stock + '</div></div>';
   }).join("");
+}
+
+// ---------- 盤點：關鍵字搜尋後，右邊直接輸入數量，一次送出 ----------
+var batchHits = [], batchCnt = {};   // batchCnt[id] = 輸入的實盤數（字串）
+function renderBatchCount(hits) {
+  closeDetail(true); batchHits = hits;
+  var html = '<div class="bc-head"><span class="t">共 ' + hits.length + ' 筆・只送出有填數量的</span>' +
+    '<button class="btn ok" id="bcSend" onclick="submitBatchCount()">送出盤點</button></div>' +
+    hits.map(function (it, i) {
+      var v = batchCnt[it.id] != null ? batchCnt[it.id] : "";
+      return '<div class="bc-row" id="bcr' + i + '"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(properOf(it) || "（無料號）") + '</span></div>' +
+        '<div class="sys">系統<br><b id="bcs' + i + '">' + it.stock + '</b></div>' +
+        '<input type="number" inputmode="numeric" min="0" id="bci' + i + '" value="' + esc(v) + '" placeholder="實盤" oninput="bcInput(' + i + ')" onkeydown="bcKey(event,' + i + ')">' +
+        '<span class="df" id="bcd' + i + '"></span>' +
+        '<button class="same" onclick="bcSame(' + i + ')">＝系統</button></div>';
+    }).join("");
+  $("res").innerHTML = html;
+  hits.forEach(function (it, i) { bcUpd(i); });
+  bcCount();
+  // 讀最新庫存
+  var ids = hits.map(function (it) { return it.id; });
+  if (ids.length) api("/rest/v1/inventory?select=id,stock&id=in.(" + ids.join(",") + ")").then(function (r) {
+    (r || []).forEach(function (x) { var it = findId(x.id); if (it) it.stock = x.stock; });
+    if (batchHits === hits) hits.forEach(function (it, i) { var e = $("bcs" + i); if (e) { e.textContent = it.stock; bcUpd(i); } });
+  }).catch(function () {});
+}
+function bcUpd(i) {
+  var it = batchHits[i], inp = $("bci" + i); if (!it || !inp) return;
+  var v = inp.value.trim(), d = $("bcd" + i);
+  inp.classList.toggle("filled", v !== "");
+  if (v === "" || isNaN(parseInt(v, 10))) { d.textContent = ""; return; }
+  var df = parseInt(v, 10) - it.stock;
+  d.className = "df " + (df > 0 ? "pos" : df < 0 ? "neg" : ""); d.textContent = df === 0 ? "✔" : (df > 0 ? "+" : "") + df;
+}
+function bcCount() {
+  var n = 0; batchHits.forEach(function (it) { if (batchCnt[it.id] != null && batchCnt[it.id] !== "") n++; });
+  var b = $("bcSend"); if (b) { b.textContent = n ? "送出盤點（" + n + " 筆）" : "送出盤點"; b.disabled = !n; }
+}
+function bcInput(i) { var it = batchHits[i]; batchCnt[it.id] = $("bci" + i).value.trim(); bcUpd(i); bcCount(); }
+function bcSame(i) { $("bci" + i).value = batchHits[i].stock; bcInput(i); var nx = $("bci" + (i + 1)); if (nx) nx.focus(); }
+function bcKey(e, i) { if (e.key === "Enter") { e.preventDefault(); var nx = $("bci" + (i + 1)); if (nx) nx.focus(); else submitBatchCount(); } }
+function submitBatchCount() {
+  var rows = [];
+  batchHits.forEach(function (it, i) {
+    var v = batchCnt[it.id]; if (v == null || v === "") return;
+    var n = parseInt(v, 10); if (isNaN(n) || n < 0) return;
+    rows.push({ it: it, i: i, n: n, df: n - it.stock });
+  });
+  if (!rows.length) { toast("請先在右邊填數量"); return; }
+  var big = rows.filter(function (r) { return Math.abs(r.df) >= 20; });
+  if (!confirm("送出 " + rows.length + " 筆盤點？\n\n" + rows.map(function (r) { return "・" + r.it.name + "　" + r.it.stock + " → " + r.n + (r.df ? "（" + (r.df > 0 ? "+" : "") + r.df + "）" : "（相同）"); }).join("\n") +
+      (big.length ? "\n\n⚠ 差額 20 件以上，請再確認沒有打錯" : ""))) return;
+  $("bcSend").disabled = true;
+  var ok = 0, fail = 0;
+  var chain = Promise.resolve();
+  rows.forEach(function (r) {
+    chain = chain.then(function () {
+      return rpc("submit_stocktake", { p_pin: pin, p_part_id: r.it.id, p_part_name: r.it.name, p_barcode: r.it.barcode || "", p_system_stock: r.it.stock, p_counted: r.n, p_counter: who })
+        .then(function (id) {
+          ok++; delete batchCnt[r.it.id];
+          histCounts.unshift({ id: id, part_name: r.it.name, system_stock: r.it.stock, counted: r.n, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
+          var row = $("bcr" + r.i); if (row) row.classList.add("done");
+        }).catch(function (e) { fail++; if (/PIN/.test(e.message)) throw e; });
+    });
+  });
+  chain.then(function () {
+    renderHist(); bcCount();
+    toast(fail ? "送出 " + ok + " 筆，" + fail + " 筆失敗，請再按一次" : "已送出 " + ok + " 筆盤點，寫回東邑中…", 3000);
+  }).catch(function (e) { toast("送出失敗：" + e.message, 4000); logout(); });
 }
 function pickById(id) { var it = findId(id); if (it) pickItem(it); }
 function pickItem(it) {
@@ -698,6 +786,17 @@ function scanPhoto(file) {
 
 // ---------- 啟動 ----------
 $("zoom").addEventListener("input", applyZoom);
+// 電腦＋掃描槍：點完按鈕後游標自動回到搜尋框（觸控平板不自動，避免一直跳出鍵盤）
+var DESKTOP = window.matchMedia && window.matchMedia("(pointer: fine)").matches;
+function refocus() {
+  if (!DESKTOP || mode === "count" && !$("detail").classList.contains("hide")) return;
+  if ($("mNew").classList.contains("on") || $("mPick").classList.contains("on")) return;
+  var a = document.activeElement, t = a && a.tagName;
+  if (t === "INPUT" && a.id !== "q" || t === "SELECT" || t === "TEXTAREA") return;
+  try { $("q").focus(); } catch (e) {}
+}
+document.addEventListener("click", function () { setTimeout(refocus, 0); });
+document.addEventListener("change", function () { setTimeout(refocus, 0); });
 $("photo").addEventListener("change", function () { scanPhoto(this.files && this.files[0]); });
 $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(this.value); } });
 $("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2 && !looksLikeCode(v)) search(v); else if (!v) $("res").innerHTML = ""; });
