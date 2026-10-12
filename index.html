@@ -471,7 +471,7 @@ function submitBatchCount() {
       return rpc("submit_stocktake", { p_pin: pin, p_part_id: r.it.id, p_part_name: r.it.name, p_barcode: r.it.barcode || "", p_system_stock: r.it.stock, p_counted: r.n, p_counter: who })
         .then(function (id) {
           ok++; delete batchCnt[r.it.id];
-          histCounts.unshift({ id: id, part_name: r.it.name, system_stock: r.it.stock, counted: r.n, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
+          histCounts.unshift({ id: id, part_id: r.it.id, part_name: r.it.name, system_stock: r.it.stock, counted: r.n, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
           var row = $("bcr" + r.i); if (row) row.classList.add("done");
         }).catch(function (e) { fail++; if (/PIN/.test(e.message)) throw e; });
     });
@@ -575,7 +575,7 @@ function submitList() {
   });
   rpc("submit_moves", { p_pin: pin, p_moves: moves }).then(function (ids) {
     var now = new Date().toISOString();
-    (ids || []).forEach(function (id, i) { var m = moves[i]; histMoves.unshift({ id: id, kind: kind, part_name: m.part_name, qty: m.qty, status: "pending", created_at: now, man: who, _t: Date.now() }); });
+    (ids || []).forEach(function (id, i) { var m = moves[i]; histMoves.unshift({ id: id, kind: kind, part_id: m.part_id, part_name: m.part_name, qty: m.qty, status: "pending", created_at: now, man: who, _t: Date.now() }); });
     lists[mode] = []; saveLists(); renderList(); renderHist();
     toast(label + "已送出，寫回東邑中…", 3000);
   }).catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
@@ -659,7 +659,7 @@ function submitCount() {
   $("cntBtn").disabled = true; var it = cur;
   rpc("submit_stocktake", { p_pin: pin, p_part_id: it.id, p_part_name: it.name, p_barcode: it.barcode || "", p_system_stock: curStock, p_counted: v, p_counter: who })
     .then(function (id) {
-      histCounts.unshift({ id: id, part_name: it.name, system_stock: curStock, counted: v, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
+      histCounts.unshift({ id: id, part_id: it.id, part_name: it.name, system_stock: curStock, counted: v, status: "pending", created_at: new Date().toISOString(), _t: Date.now() });
       renderHist(); toast("已送出：" + it.name); closeDetail();
     })
     .catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
@@ -669,33 +669,53 @@ function submitCount() {
 // ---------- 紀錄 ----------
 function loadHist() {
   var d = new Date(); d.setHours(0, 0, 0, 0); var iso = encodeURIComponent(d.toISOString());
-  api("/rest/v1/stock_move?select=*&kind=neq.new&created_at=gte." + iso + "&order=id.desc&limit=300").then(function (r) { histMoves = r || []; renderHist(); }).catch(function () {});
-  api("/rest/v1/stocktake?select=*&created_at=gte." + iso + "&order=id.desc&limit=300").then(function (r) { histCounts = r || []; renderHist(); }).catch(function () {});
+  api("/rest/v1/stock_move?select=*&kind=neq.new&created_at=gte." + iso + "&order=id.desc&limit=300").then(function (r) { histMoves = r || []; renderHist(); refreshHistStock(); }).catch(function () {});
+  api("/rest/v1/stocktake?select=*&created_at=gte." + iso + "&order=id.desc&limit=300").then(function (r) { histCounts = r || []; renderHist(); refreshHistStock(); }).catch(function () {});
+}
+// 讀紀錄上這些材料「現在」的庫存（別台平板盤點/出庫後也會跟著變）
+var lastHistStock = 0;
+function refreshHistStock() {
+  lastHistStock = Date.now();
+  var seen = {}, ids = [];
+  histMoves.concat(histCounts).forEach(function (h) { if (h.part_id && !seen[h.part_id]) { seen[h.part_id] = 1; ids.push(h.part_id); } });
+  if (!ids.length) return;
+  api("/rest/v1/inventory?select=id,stock&id=in.(" + ids.slice(0, 300).join(",") + ")").then(function (r) {
+    (r || []).forEach(function (x) { var it = findId(x.id); if (it) it.stock = x.stock; });
+    renderHist();
+  }).catch(function () {});
 }
 function tagOf(h, okText) {
   return h.status === "applied" ? '<span class="tag t-applied">✔ ' + okText + '</span>' :
          h.status === "error" ? '<span class="tag t-error">✖ ' + esc(h.error || "失敗") + '</span>' :
          '<span class="tag t-pending">' + (h._t && Date.now() - h._t > 30000 ? "⚠ 等待中（服務沒開？）" : "寫回中…") + '</span>';
 }
+// 紀錄上的數字是「當下寫完剩多少」；之後若有其他異動（盤點、再出庫），一併顯示現在的庫存
+function stockTag(h, cur) {
+  var t = "剩 " + h.stock_after;
+  if (h.status === "applied" && cur !== undefined && cur !== null && +cur !== +h.stock_after) t += " → 現在 " + cur;
+  return t;
+}
 function renderHist() {
-  var html;
+  var html, now = {};
+  for (var k = 0; k < items.length; k++) now[items[k].id] = items[k].stock;
   if (mode === "count") {
     html = histCounts.map(function (h) {
       var df = h.counted - h.system_stock;
       return '<div class="h"><span class="n">' + esc(h.part_name) + '</span><span>' + h.counted + ' <small class="' + (df > 0 ? "pos" : df < 0 ? "neg" : "") + '">(' + (df > 0 ? "+" : "") + df + ')</small></span>' +
-        tagOf(h, "庫存 " + h.stock_after) + '</div>';
+        tagOf(h, stockTag(h, now[h.part_id])) + '</div>';
     }).join("");
   } else {
     html = histMoves.map(function (h) {
       var isIn = h.kind === "in";
       return '<div class="h"><span class="' + (isIn ? "k-in" : "k-out") + '">' + (isIn ? "入" : "出") + '</span><span class="n">' + esc(h.part_name) + '</span><span>' + (isIn ? "+" : "−") + h.qty + '</span>' +
-        tagOf(h, "庫存 " + h.stock_after) + '</div>';
+        tagOf(h, stockTag(h, now[h.part_id])) + '</div>';
     }).join("");
   }
   $("hist").innerHTML = html || '<div class="empty">還沒有紀錄</div>';
 }
 function poll() {
   checkNew();
+  if (Date.now() - lastHistStock > 30000) refreshHistStock();
   var mi = histMoves.filter(function (h) { return h.status === "pending"; }).map(function (h) { return h.id; });
   var ci = histCounts.filter(function (h) { return h.status === "pending"; }).map(function (h) { return h.id; });
   function upd(arr, rows) {
