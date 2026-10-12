@@ -491,12 +491,13 @@ function pickItem(it) {
 function saveLists() { store("st_lists", JSON.stringify(lists)); }
 function addToList(it) {
   var L = lists[mode];
-  for (var i = 0; i < L.length; i++) if (L[i].id === it.id) { L[i].qty++; saveLists(); renderList(i); buzz(true); toast("＋1　" + it.name + "（共 " + L[i].qty + "）"); return; }
+  // 最新掃的放最上面；重複掃的也移到最上面並 +1
+  for (var i = 0; i < L.length; i++) if (L[i].id === it.id) { var x = L.splice(i, 1)[0]; x.qty++; L.unshift(x); saveLists(); renderList(0); buzz(true); toast("＋1　" + it.name + "（共 " + x.qty + "）"); return; }
   var row = { id: it.id, name: it.name, barcode: it.barcode || "", fix: needsFix(it), stock: it.stock, qty: 1,
            price: mode === "in" ? (it.in_price || 0) : (it.default_price || 0) };
   if (mode === "in") fillPrice(row, it);
-  L.push(row);
-  saveLists(); renderList(L.length - 1); buzz(true); toast("已加入　" + it.name);
+  L.unshift(row);
+  saveLists(); renderList(0); buzz(true); toast("已加入　" + it.name);
 }
 var MIN_MARGIN = 20;   // 毛利率低於 20% 提醒
 function fillPrice(x, it) {
