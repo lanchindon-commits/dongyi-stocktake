@@ -351,7 +351,7 @@ function loadItems() {
     $("meta").textContent = "材料庫 " + items.length + " 筆・最後同步 " + (last ? new Date(last).toLocaleString("zh-TW", { hour12: false }) : "-");
     // 清單裡的材料換成最新資料
     ["in", "out"].forEach(function (m) { lists[m].forEach(function (L) { var it = findId(L.id); if (it) { L.stock = it.stock; if (m === "in" && L.lastIn == null) fillPrice(L, it); } }); });
-    renderList();
+    renderList(); renderHist();
   }).catch(function (e) { $("meta").textContent = "材料庫讀取失敗：" + e.message; });
 }
 function indexItem(it) {
@@ -673,14 +673,14 @@ function loadHist() {
   api("/rest/v1/stocktake?select=*&created_at=gte." + iso + "&order=id.desc&limit=300").then(function (r) { histCounts = r || []; renderHist(); refreshHistStock(); }).catch(function () {});
 }
 // 讀紀錄上這些材料「現在」的庫存（別台平板盤點/出庫後也會跟著變）
-var lastHistStock = 0;
+var lastHistStock = 0, histNow = {};
 function refreshHistStock() {
   lastHistStock = Date.now();
   var seen = {}, ids = [];
   histMoves.concat(histCounts).forEach(function (h) { if (h.part_id && !seen[h.part_id]) { seen[h.part_id] = 1; ids.push(h.part_id); } });
   if (!ids.length) return;
   api("/rest/v1/inventory?select=id,stock&id=in.(" + ids.slice(0, 300).join(",") + ")").then(function (r) {
-    (r || []).forEach(function (x) { var it = findId(x.id); if (it) it.stock = x.stock; });
+    (r || []).forEach(function (x) { histNow[x.id] = x.stock; var it = findId(x.id); if (it) it.stock = x.stock; });
     renderHist();
   }).catch(function () {});
 }
@@ -698,6 +698,7 @@ function stockTag(h, cur) {
 function renderHist() {
   var html, now = {};
   for (var k = 0; k < items.length; k++) now[items[k].id] = items[k].stock;
+  for (var hk in histNow) if (!(hk in now)) now[hk] = histNow[hk];
   if (mode === "count") {
     html = histCounts.map(function (h) {
       var df = h.counted - h.system_stock;
