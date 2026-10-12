@@ -117,7 +117,7 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .h { display: flex; gap: 8px; align-items: center; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: .95rem; }
 .h .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 700; white-space: nowrap; }
-.t-pending { background: #fef3c7; color: var(--warn); } .t-applied { background: #dcfce7; color: var(--ok); } .t-error { background: #fee2e2; color: var(--bad); }
+.t-pending { background: #fef3c7; color: var(--warn); } .t-applied { background: #dcfce7; color: var(--ok); } .t-error { background: #fee2e2; color: var(--bad); } .t-done { background: #f1f5f9; color: #64748b; }
 .k-in { color: var(--in); font-weight: 800; } .k-out { color: var(--out); font-weight: 800; }
 h2 { font-size: 1.05rem; margin-bottom: 8px; }
 #login { max-width: 420px; margin: 60px auto; }
@@ -700,8 +700,17 @@ function renderHist() {
   for (var k = 0; k < items.length; k++) now[items[k].id] = items[k].stock;
   for (var hk in histNow) if (!(hk in now)) now[hk] = histNow[hk];
   if (mode === "count") {
+    var byName = {};
+    for (var q = 0; q < items.length; q++) byName[items[q].name] = items[q];
     html = histCounts.map(function (h) {
       var df = h.counted - h.system_stock;
+      // 寫回失敗，但東邑現在的數量已經跟實盤一樣（例如東邑重新編號後又盤了一次）→ 不用再處理
+      if (h.status === "error") {
+        var cur = byName[h.part_name];
+        if (cur && +cur.stock === +h.counted)
+          return '<div class="h"><span class="n">' + esc(h.part_name) + '</span><span>' + h.counted + '</span>' +
+            '<span class="tag t-done">✔ 東邑已是 ' + cur.stock + '，不用處理</span></div>';
+      }
       return '<div class="h"><span class="n">' + esc(h.part_name) + '</span><span>' + h.counted + ' <small class="' + (df > 0 ? "pos" : df < 0 ? "neg" : "") + '">(' + (df > 0 ? "+" : "") + df + ')</small></span>' +
         tagOf(h, stockTag(h, now[h.part_id])) + '</div>';
     }).join("");
