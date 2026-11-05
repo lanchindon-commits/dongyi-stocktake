@@ -118,6 +118,8 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .h .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 700; white-space: nowrap; }
 .pz { color: #b45309; }
+.nobc { color: var(--bad); font-weight: 700; }
+.bcbtn { border: 1px solid #2563eb; color: #2563eb; background: #eff6ff; border-radius: 8px; padding: 2px 10px; font-size: .85rem; font-weight: 700; margin-left: 4px; }
 .t-pending { background: #fef3c7; color: var(--warn); } .t-applied { background: #dcfce7; color: var(--ok); } .t-error { background: #fee2e2; color: var(--bad); } .t-done { background: #f1f5f9; color: #64748b; }
 .k-in { color: var(--in); font-weight: 800; } .k-out { color: var(--out); font-weight: 800; }
 h2 { font-size: 1.05rem; margin-bottom: 8px; }
@@ -574,8 +576,11 @@ function renderList(flash) {
   if (!L.length) { $("list").innerHTML = '<div class="empty">掃描後會加到這裡（同一件掃多次自動 +1）</div>'; $("sum").textContent = ""; return; }
   $("list").innerHTML = L.map(function (x, i) {
     tq += x.qty; var after = x.stock + sign * x.qty;
-    return '<div class="li' + (i === flash ? " flash" : "") + '"><div class="nm"><b>' + esc(x.name) + '</b><small>' + esc(x.fix || x.barcode || "（無料號）") +
-      (x.fix ? ' <span class="fx">（東邑存成 ' + esc(x.barcode) + '，送出時改正）</span>' : "") + '</small></div>' +
+    var bcHtml = !x.barcode
+      ? (x.fix ? esc(x.fix) + ' <span class="fx">（新料號，送出時寫入東邑）</span> <button class="bcbtn" onclick="editBc(' + i + ')">修改</button>'
+               : '<span class="nobc">（無料號）</span> <button class="bcbtn" onclick="editBc(' + i + ')">＋填料號</button>')
+      : esc(x.fix || x.barcode) + (x.fix ? ' <span class="fx">（東邑存成 ' + esc(x.barcode) + '，送出時改正）</span>' : "");
+    return '<div class="li' + (i === flash ? " flash" : "") + '"><div class="nm"><b>' + esc(x.name) + '</b><small>' + bcHtml + '</small></div>' +
       '<div class="ctl"><button onclick="bumpQ(' + i + ',-1)">−</button><input type="number" inputmode="numeric" value="' + x.qty + '" onchange="setQ(' + i + ',this.value)"><button onclick="bumpQ(' + i + ',1)">＋</button></div>' +
       '<div class="sub">' + (mode === "in" && x.qty === 0 ? '<span>庫存 ' + x.stock + '　<b class="pz">只改價格，不入庫</b></span>' : '<span>庫存 ' + x.stock + ' → <b class="' + (after < 0 ? "neg" : "") + '">' + after + '</b></span>') +
       (mode !== "in" && $("otT").checked ? '<span>售價 <input type="number" inputmode="numeric" value="' + x.price + '" onchange="setP(' + i + ',this.value)"></span>' : "") +
@@ -583,6 +588,19 @@ function renderList(flash) {
   }).join("");
   $("sum").textContent = "共 " + L.length + " 項、" + tq + " 件";
   if (mode === "in") L.forEach(function (x, i) { updPrices(i); });
+}
+// 沒有料號的材料：直接打字或用掃描槍掃，送出時一起寫進東邑（掃描槍的 12 碼會自動轉成正確格式）
+function editBc(i) {
+  var x = lists[mode][i];
+  var v = prompt("「" + x.name + "」的料號\n可以直接打字，或用掃描槍掃包裝上的條碼：", x.fix || "");
+  if (v === null) return;
+  v = String(v).trim();
+  if (!v) { x.fix = ""; saveLists(); renderList(); return; }
+  v = toProper(v);
+  if (key(v).length < 4) { alert("料號太短，請再確認"); return; }
+  var dup = null; items.forEach(function (it) { if (it.id !== x.id && it.barcode && key(it.barcode) === key(v)) dup = it; });
+  if (dup) { alert("這個料號已經是「" + dup.name + "」在用，不能重複。\n請確認是不是同一個材料。"); return; }
+  x.fix = v; saveLists(); renderList(); toast("料號 " + v + " 會在送出時寫入東邑");
 }
 // 入庫可以填 0 = 只改價格；出庫至少 1
 function minQ() { return mode === "in" ? 0 : 1; }
@@ -602,7 +620,7 @@ function submitList() {
   var tq = 0, negs = [];
   L.forEach(function (x) { tq += x.qty; if (!isIn && x.stock - x.qty < 0) negs.push(x.name); });
   // 數量 0 又沒改價格 = 沒事可做，略過
-  var skip = isIn ? L.filter(function (x) { return x.qty === 0 && x.price === x.lastIn && x.outP === x.lastOut; }) : [];
+  var skip = isIn ? L.filter(function (x) { return x.qty === 0 && x.price === x.lastIn && x.outP === x.lastOut && !(x.fix && !x.barcode); }) : [];
   var S = L.filter(function (x) { return skip.indexOf(x) < 0; });
   if (!S.length) { toast("數量是 0、價格也沒改，沒有東西要送出", 3000); return; }
   var pOnly = S.filter(function (x) { return isIn && x.qty === 0; }).length;
@@ -610,6 +628,7 @@ function submitList() {
     return "・" + x.name + "\n　" + (x.price !== x.lastIn ? "進價 " + x.lastIn + " → " + x.price + "　" : "") + (x.outP !== x.lastOut ? "售價 " + x.lastOut + " → " + x.outP : "");
   }) : [];
   if (!confirm(label + "　" + S.length + " 項、共 " + tq + " 件" + (pOnly ? "（其中 " + pOnly + " 項只改價格）" : "") + "\n經手人：" + who + (partner ? "\n對象：" + partner : "") +
+      (S.some(function (x) { return x.fix && !x.barcode; }) ? "\n\n以下會補上料號：\n" + S.filter(function (x) { return x.fix && !x.barcode; }).map(function (x) { return "・" + x.name + " → " + x.fix; }).join("\n") : "") +
       (skip.length ? "\n\n數量 0 又沒改價格，會略過：\n" + skip.map(function (x) { return "・" + x.name; }).join("\n") : "") +
       (chg.length ? "\n\n以下價格會一起更新到東邑：\n" + chg.join("\n") : "") +
       (negs.length ? "\n\n⚠ 扣完會變負庫存：\n" + negs.join("\n") : "") + "\n\n確定送出並寫回東邑？")) return;
@@ -628,6 +647,7 @@ function submitList() {
         if (x.price > 0) { it.in_price = x.price; if (x.qty > 0) it.last_in_price = x.price; }
         if (x.outP > 0) it.default_price = x.outP;
         if (x.qty > 0) { it.last_in_date = ds; it.last_in_supplier = partner; } }); }
+    S.forEach(function (x) { var it = findId(x.id); if (it && x.fix) { it.barcode = x.fix; indexItem(it); } });
     lists[mode] = []; saveLists(); renderList(); renderHist();
     toast(label + "已送出，寫回東邑中…", 3000);
   }).catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
