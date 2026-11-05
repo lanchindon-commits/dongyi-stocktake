@@ -498,6 +498,43 @@ function addToList(it) {
   if (mode === "in") fillPrice(row, it);
   L.unshift(row);
   saveLists(); renderList(0); buzz(true); toast("已加入　" + it.name);
+  refreshRow(row, mode);
+}
+// 抓雲端最新的價格／庫存；使用者還沒改過的欄位就換成最新值
+function refreshRow(row, m) {
+  api("/rest/v1/inventory?select=id,name,barcode,stock,in_price,default_price,applicably,updated_at,last_in_date,last_in_supplier,last_in_price&id=eq." + row.id).then(function (r) {
+    var x = null; (r || []).forEach(function (y) { if (y.id === row.id) x = y; }); if (!x) return;
+    var it = findId(row.id), oldDef = it ? it.default_price : null; if (it) for (var k in x) it[k] = x[k];
+    var L = lists[m], i = L.indexOf(row); if (i < 0) return;
+    var oldIn = row.lastIn, oldOut = row.lastOut, chg = false;
+    row.stock = x.stock;
+    if (m === "in") {
+      var untouchedP = row.price === oldIn, untouchedO = row.outP === oldOut;
+      fillPrice(row, x); row.outP = untouchedO ? row.lastOut : row.outP;
+      if (untouchedP) row.price = row.lastIn;
+      chg = oldIn !== row.lastIn || oldOut !== row.lastOut;
+    } else if (oldDef != null && row.price === oldDef) { row.price = x.default_price || 0; }
+    saveLists(); if (m === mode) renderList();
+    if (chg && m === mode) toast("已更新為最新價格：" + row.name);
+  }).catch(function () {});
+}
+// 每 2 分鐘、以及回到這個畫面時，把雲端有變動的材料抓下來（平板開著一整天也不會用到舊價格）
+var lastItemSync = 0;
+function refreshItems() {
+  if (!items.length) return;
+  lastItemSync = Date.now();
+  var last = ""; items.forEach(function (it) { if (it.updated_at > last) last = it.updated_at; });
+  if (!last) return;
+  api("/rest/v1/inventory?select=id,name,barcode,stock,in_price,default_price,applicably,updated_at,last_in_date,last_in_supplier,last_in_price,active&updated_at=gt." + encodeURIComponent(last) + "&order=updated_at&limit=2000").then(function (r) {
+    if (!r || !r.length) return;
+    r.forEach(function (x) {
+      var it = findId(x.id);
+      if (it) { if (it.name !== x.name || it.barcode !== x.barcode) { for (var k in x) it[k] = x[k]; indexItem(it); } else for (var k2 in x) it[k2] = x[k2]; }
+      else if (x.active !== false) { items.push(x); indexItem(x); }
+    });
+    var nl = ""; items.forEach(function (it) { if (it.updated_at > nl) nl = it.updated_at; });
+    $("meta").textContent = "材料庫 " + items.length + " 筆・最後同步 " + new Date(nl).toLocaleString("zh-TW", { hour12: false });
+  }).catch(function () {});
 }
 var MIN_MARGIN = 20;   // 毛利率低於 20% 提醒
 function fillPrice(x, it) {
@@ -576,6 +613,12 @@ function submitList() {
   rpc("submit_moves", { p_pin: pin, p_moves: moves }).then(function (ids) {
     var now = new Date().toISOString();
     (ids || []).forEach(function (id, i) { var m = moves[i]; histMoves.unshift({ id: id, kind: kind, part_id: m.part_id, part_name: m.part_name, qty: m.qty, status: "pending", created_at: now, man: who, _t: Date.now() }); });
+    // 本機材料資料立刻換成這次的價格，下次掃同一個材料就會帶新價錢
+    if (isIn) { var td = new Date(), ds = td.getFullYear() + "/" + ("0" + (td.getMonth() + 1)).slice(-2) + "/" + ("0" + td.getDate()).slice(-2);
+      L.forEach(function (x) { var it = findId(x.id); if (!it) return;
+        if (x.price > 0) { it.in_price = x.price; it.last_in_price = x.price; }
+        if (x.outP > 0) it.default_price = x.outP;
+        it.last_in_date = ds; it.last_in_supplier = partner; }); }
     lists[mode] = []; saveLists(); renderList(); renderHist();
     toast(label + "已送出，寫回東邑中…", 3000);
   }).catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
@@ -725,6 +768,7 @@ function renderHist() {
 }
 function poll() {
   checkNew();
+  if (Date.now() - lastItemSync > 120000) refreshItems();
   if (Date.now() - lastHistStock > 30000) refreshHistStock();
   var mi = histMoves.filter(function (h) { return h.status === "pending"; }).map(function (h) { return h.id; });
   var ci = histCounts.filter(function (h) { return h.status === "pending"; }).map(function (h) { return h.id; });
@@ -836,7 +880,7 @@ $("cnt").addEventListener("keydown", function (e) { if (e.key === "Enter") submi
 $("otT").addEventListener("change", renderList); $("otI").addEventListener("change", renderList);
 $("supplier").addEventListener("change", function () { store("st_supplier", this.value); });
 $("store").addEventListener("change", function () { store("st_store", this.value); });
-document.addEventListener("visibilitychange", function () { if (!document.hidden && pin) loadHist(); });
+document.addEventListener("visibilitychange", function () { if (!document.hidden && pin) { loadHist(); refreshItems(); } });
 (function () { var ua = navigator.userAgent;
   if (/Line\/|FBAN|FBAV|Instagram|MicroMessenger/i.test(ua)) { var e = $("inapp"); e.style.display = "block"; e.textContent = "⚠ 你正在 LINE／FB 內建瀏覽器，相機常常不能用。請按右上角「⋯」→ 用 Chrome 或 Safari 開啟"; }
 })();
