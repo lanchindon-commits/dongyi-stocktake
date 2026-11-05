@@ -117,6 +117,7 @@ select, input.txt { font-size: 1.05rem; padding: 9px 10px; border: 2px solid var
 .h { display: flex; gap: 8px; align-items: center; padding: 9px 2px; border-bottom: 1px solid var(--line); font-size: .95rem; }
 .h .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag { border-radius: 999px; padding: 3px 10px; font-size: .8rem; font-weight: 700; white-space: nowrap; }
+.pz { color: #b45309; }
 .t-pending { background: #fef3c7; color: var(--warn); } .t-applied { background: #dcfce7; color: var(--ok); } .t-error { background: #fee2e2; color: var(--bad); } .t-done { background: #f1f5f9; color: #64748b; }
 .k-in { color: var(--in); font-weight: 800; } .k-out { color: var(--out); font-weight: 800; }
 h2 { font-size: 1.05rem; margin-bottom: 8px; }
@@ -576,15 +577,17 @@ function renderList(flash) {
     return '<div class="li' + (i === flash ? " flash" : "") + '"><div class="nm"><b>' + esc(x.name) + '</b><small>' + esc(x.fix || x.barcode || "（無料號）") +
       (x.fix ? ' <span class="fx">（東邑存成 ' + esc(x.barcode) + '，送出時改正）</span>' : "") + '</small></div>' +
       '<div class="ctl"><button onclick="bumpQ(' + i + ',-1)">−</button><input type="number" inputmode="numeric" value="' + x.qty + '" onchange="setQ(' + i + ',this.value)"><button onclick="bumpQ(' + i + ',1)">＋</button></div>' +
-      '<div class="sub"><span>庫存 ' + x.stock + ' → <b class="' + (after < 0 ? "neg" : "") + '">' + after + '</b></span>' +
+      '<div class="sub">' + (mode === "in" && x.qty === 0 ? '<span>庫存 ' + x.stock + '　<b class="pz">只改價格，不入庫</b></span>' : '<span>庫存 ' + x.stock + ' → <b class="' + (after < 0 ? "neg" : "") + '">' + after + '</b></span>') +
       (mode !== "in" && $("otT").checked ? '<span>售價 <input type="number" inputmode="numeric" value="' + x.price + '" onchange="setP(' + i + ',this.value)"></span>' : "") +
       '<button class="del" onclick="delRow(' + i + ')">刪除</button></div>' + (mode === "in" ? priceHtml(x, i) : "") + '</div>';
   }).join("");
   $("sum").textContent = "共 " + L.length + " 項、" + tq + " 件";
   if (mode === "in") L.forEach(function (x, i) { updPrices(i); });
 }
-function bumpQ(i, n) { var x = lists[mode][i]; x.qty = Math.max(1, x.qty + n); saveLists(); renderList(); }
-function setQ(i, v) { var n = parseInt(v, 10); lists[mode][i].qty = isNaN(n) || n < 1 ? 1 : n; saveLists(); renderList(); }
+// 入庫可以填 0 = 只改價格；出庫至少 1
+function minQ() { return mode === "in" ? 0 : 1; }
+function bumpQ(i, n) { var x = lists[mode][i]; x.qty = Math.max(minQ(), x.qty + n); saveLists(); renderList(); }
+function setQ(i, v) { var n = parseInt(v, 10); lists[mode][i].qty = isNaN(n) || n < minQ() ? minQ() : n; saveLists(); renderList(); }
 function setP(i, v) { var n = parseInt(v, 10); lists[mode][i].price = isNaN(n) ? 0 : n; saveLists(); if (mode === "in") updPrices(i); }
 function setO(i, v) { var n = parseInt(v, 10); lists.in[i].outP = isNaN(n) ? 0 : n; saveLists(); updPrices(i); }
 function delRow(i) { lists[mode].splice(i, 1); saveLists(); renderList(); }
@@ -598,15 +601,21 @@ function submitList() {
   var label = isIn ? "入庫" : (isT ? "出庫（調撥）" : "出庫（內部）");
   var tq = 0, negs = [];
   L.forEach(function (x) { tq += x.qty; if (!isIn && x.stock - x.qty < 0) negs.push(x.name); });
+  // 數量 0 又沒改價格 = 沒事可做，略過
+  var skip = isIn ? L.filter(function (x) { return x.qty === 0 && x.price === x.lastIn && x.outP === x.lastOut; }) : [];
+  var S = L.filter(function (x) { return skip.indexOf(x) < 0; });
+  if (!S.length) { toast("數量是 0、價格也沒改，沒有東西要送出", 3000); return; }
+  var pOnly = S.filter(function (x) { return isIn && x.qty === 0; }).length;
   var chg = isIn ? L.filter(function (x) { return x.price !== x.lastIn || x.outP !== x.lastOut; }).map(function (x) {
     return "・" + x.name + "\n　" + (x.price !== x.lastIn ? "進價 " + x.lastIn + " → " + x.price + "　" : "") + (x.outP !== x.lastOut ? "售價 " + x.lastOut + " → " + x.outP : "");
   }) : [];
-  if (!confirm(label + "　" + L.length + " 項、共 " + tq + " 件\n經手人：" + who + (partner ? "\n對象：" + partner : "") +
+  if (!confirm(label + "　" + S.length + " 項、共 " + tq + " 件" + (pOnly ? "（其中 " + pOnly + " 項只改價格）" : "") + "\n經手人：" + who + (partner ? "\n對象：" + partner : "") +
+      (skip.length ? "\n\n數量 0 又沒改價格，會略過：\n" + skip.map(function (x) { return "・" + x.name; }).join("\n") : "") +
       (chg.length ? "\n\n以下價格會一起更新到東邑：\n" + chg.join("\n") : "") +
       (negs.length ? "\n\n⚠ 扣完會變負庫存：\n" + negs.join("\n") : "") + "\n\n確定送出並寫回東邑？")) return;
   store(isIn ? "st_supplier" : "st_store", isIn ? $("supplier").value : $("store").value);
   $("sendBtn").disabled = true;
-  var moves = L.map(function (x) {
+  var moves = S.map(function (x) {
     return { kind: kind, part_id: x.id, part_name: x.name, barcode: x.barcode, fix_barcode: x.fix || "", qty: x.qty, price: kind === "out_internal" ? 0 : x.price, partner: partner, man: who,
              extra: isIn && x.outP !== x.lastOut && x.outP > 0 ? { out_price: x.outP } : null };
   });
@@ -615,10 +624,10 @@ function submitList() {
     (ids || []).forEach(function (id, i) { var m = moves[i]; histMoves.unshift({ id: id, kind: kind, part_id: m.part_id, part_name: m.part_name, qty: m.qty, status: "pending", created_at: now, man: who, _t: Date.now() }); });
     // 本機材料資料立刻換成這次的價格，下次掃同一個材料就會帶新價錢
     if (isIn) { var td = new Date(), ds = td.getFullYear() + "/" + ("0" + (td.getMonth() + 1)).slice(-2) + "/" + ("0" + td.getDate()).slice(-2);
-      L.forEach(function (x) { var it = findId(x.id); if (!it) return;
-        if (x.price > 0) { it.in_price = x.price; it.last_in_price = x.price; }
+      S.forEach(function (x) { var it = findId(x.id); if (!it) return;
+        if (x.price > 0) { it.in_price = x.price; if (x.qty > 0) it.last_in_price = x.price; }
         if (x.outP > 0) it.default_price = x.outP;
-        it.last_in_date = ds; it.last_in_supplier = partner; }); }
+        if (x.qty > 0) { it.last_in_date = ds; it.last_in_supplier = partner; } }); }
     lists[mode] = []; saveLists(); renderList(); renderHist();
     toast(label + "已送出，寫回東邑中…", 3000);
   }).catch(function (e) { toast("送出失敗：" + e.message, 4000); if (/PIN/.test(e.message)) logout(); })
@@ -760,7 +769,7 @@ function renderHist() {
   } else {
     html = histMoves.map(function (h) {
       var isIn = h.kind === "in";
-      return '<div class="h"><span class="' + (isIn ? "k-in" : "k-out") + '">' + (isIn ? "入" : "出") + '</span><span class="n">' + esc(h.part_name) + '</span><span>' + (isIn ? "+" : "−") + h.qty + '</span>' +
+      return '<div class="h"><span class="' + (isIn ? "k-in" : "k-out") + '">' + (isIn ? "入" : "出") + '</span><span class="n">' + esc(h.part_name) + '</span><span>' + (isIn && +h.qty === 0 ? "改價" : (isIn ? "+" : "−") + h.qty) + '</span>' +
         tagOf(h, stockTag(h, now[h.part_id])) + '</div>';
     }).join("");
   }
