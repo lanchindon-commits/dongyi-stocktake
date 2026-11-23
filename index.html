@@ -229,7 +229,7 @@ h2 { font-size: 1.05rem; margin-bottom: 8px; }
 
 <!-- 多筆符合 -->
 <div class="mask" id="mPick"><div class="dlg">
-  <h2>對到多筆材料，請選一筆</h2>
+  <h2 id="pickT">對到多筆材料，請選一筆</h2>
   <div id="pickList"></div>
   <button class="btn gray" style="width:100%" onclick="closeDlg()">取消</button>
 </div></div>
@@ -357,12 +357,24 @@ function loadItems() {
     renderList(); renderHist();
   }).catch(function (e) { $("meta").textContent = "材料庫讀取失敗：" + e.message; });
 }
+// 重新建索引前先把舊的索引清掉，否則材料改了料號/改名後，用舊料號還是找得到它
+function unindexItem(it) {
+  (it._ks || []).forEach(function (k) {
+    var a = byKey[k]; if (!a) return;
+    var i = a.indexOf(it); if (i >= 0) a.splice(i, 1);
+    if (!a.length) delete byKey[k];
+  });
+  it._ks = [];
+}
 function indexItem(it) {
+  unindexItem(it);
   it._k = key(it.barcode); it._s = (it.name + " " + it.barcode + " " + (it.applicably || "")).toUpperCase();
   var ks = [];
   if (it._k) ks.push(it._k);
-  if (/^[0-9A-Z]{12}$/.test(it._k) && !PGO.test(it._k)) ks.push(it._k.substr(0, 10));
+  // 只有色碼是 00 的才可以用前 10 碼找（P1、P6… 這種色碼不一樣就是不同材料）
+  if (/^[0-9A-Z]{10}00$/.test(it._k) && !PGO.test(it._k)) ks.push(it._k.substr(0, 10));
   var p = key(properOf(it)); if (p && ks.indexOf(p) < 0) ks.push(p);
+  it._ks = ks;
   ks.forEach(function (k) { var a = byKey[k] = byKey[k] || []; if (a.indexOf(it) < 0) a.push(it); });
 }
 function findId(id) { for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i]; return null; }
@@ -393,11 +405,11 @@ function search(raw) {
   var conv = looksLikeCode(raw) ? toProper(raw) : raw;
   if (conv !== raw.toUpperCase()) camMsg("已轉換：" + raw.toUpperCase() + " → " + conv); else if (looksLikeCode(raw)) camMsg("");
   var k = key(raw), kp = key(conv), hits = byKey[kp] || byKey[k] || [];
-  if (!hits.length && k.length === 12) hits = byKey[k.substr(0, 10)] || [];
+  if (!hits.length && /^[0-9A-Z]{10}00$/.test(k)) hits = byKey[k.substr(0, 10)] || [];
   if (looksLikeCode(raw)) {
     $("q").value = "";
     if (hits.length === 1) { pickItem(hits[0]); return; }
-    if (hits.length > 1) { showPick(hits); return; }
+    if (hits.length > 1) { showPick(hits, conv); return; }
     buzz(false);
     if (mode === "count") { $("res").innerHTML = '<div class="empty">找不到「' + esc(conv) + '」，可用名稱關鍵字搜尋</div>'; return; }
     showNew(conv); return;
@@ -532,6 +544,7 @@ function refreshItems() {
     if (!r || !r.length) return;
     r.forEach(function (x) {
       var it = findId(x.id);
+      if (it && x.active === false) { unindexItem(it); items.splice(items.indexOf(it), 1); return; }   // 東邑刪掉的材料就不要再留著
       if (it) { if (it.name !== x.name || it.barcode !== x.barcode) { for (var k in x) it[k] = x[k]; indexItem(it); } else for (var k2 in x) it[k2] = x[k2]; }
       else if (x.active !== false) { items.push(x); indexItem(x); }
     });
@@ -754,7 +767,9 @@ function refreshHistStock() {
   histMoves.concat(histCounts).forEach(function (h) { if (h.part_id && !seen[h.part_id]) { seen[h.part_id] = 1; ids.push(h.part_id); } });
   if (!ids.length) return;
   api("/rest/v1/inventory?select=id,stock&id=in.(" + ids.slice(0, 300).join(",") + ")").then(function (r) {
-    (r || []).forEach(function (x) { histNow[x.id] = x.stock; var it = findId(x.id); if (it) it.stock = x.stock; });
+    var fresh = {};
+    histMoves.concat(histCounts).forEach(function (h) { if (h.part_id && h._t && Date.now() - h._t < 90000) fresh[h.part_id] = 1; });
+    (r || []).forEach(function (x) { if (fresh[x.id]) return; histNow[x.id] = x.stock; var it = findId(x.id); if (it) it.stock = x.stock; });
     renderHist();
   }).catch(function () {});
 }
@@ -765,9 +780,9 @@ function tagOf(h, okText) {
 }
 // 紀錄上的數字是「當下寫完剩多少」；之後若有其他異動（盤點、再出庫），一併顯示現在的庫存
 function stockTag(h, cur) {
-  var t = "剩 " + h.stock_after;
-  if (h.status === "applied" && cur !== undefined && cur !== null && +cur !== +h.stock_after) t += " → 現在 " + cur;
-  return t;
+  if (h.status === "applied" && cur !== undefined && cur !== null && +cur !== +h.stock_after)
+    return "寫入後 " + h.stock_after + "，現在 " + cur;   // 之後又有其他異動（維修單用掉、再出庫、盤點…）
+  return "庫存 " + h.stock_after;
 }
 function renderHist() {
   var html, now = {};
@@ -808,7 +823,7 @@ function poll() {
       arr.forEach(function (h) {
         if (h.id === x.id && x.status !== "pending") {
           h.status = x.status; h.stock_after = x.stock_after; h.error = x.error;
-          var it = findId(x.part_id); if (it && x.stock_after != null) it.stock = x.stock_after;
+          if (x.part_id && x.stock_after != null) { histNow[x.part_id] = x.stock_after; var it = findId(x.part_id); if (it) it.stock = x.stock_after; }
         }
       });
     });
@@ -820,8 +835,9 @@ function poll() {
 }
 
 // ---------- 對話框 ----------
-function showPick(hits) {
+function showPick(hits, code) {
   pickHits = hits; buzz(false);
+  $("pickT").innerHTML = "「" + esc(code || "") + "」對到 " + hits.length + " 筆，請選一筆";
   $("pickList").innerHTML = hits.map(function (it, i) {
     return '<div class="pick" onclick="closeDlg();pickItem(pickHits[' + i + '])"><b>' + esc(it.name) + '</b><br><small>' + esc(properOf(it)) + '　編號 ' + it.id + '・庫存 ' + it.stock + '</small></div>';
   }).join("");
