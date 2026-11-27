@@ -400,6 +400,19 @@ function setOutType() {
 }
 
 // ---------- 搜尋 ----------
+// 一邊打一邊列出可能的材料（像料號的字串也要列，不要停在舊結果）
+function liveSearch(raw) {
+  raw = String(raw || "").trim(); if (!raw) { $("res").innerHTML = ""; return; }
+  if (!looksLikeCode(raw)) { search(raw); return; }
+  if (mode === "count") return;               // 盤點用 Enter 送出，避免一直重畫
+  var k = key(raw);
+  var hits = items.filter(function (it) { return (it._k && it._k.indexOf(k) >= 0) || key(it._s).indexOf(k) >= 0; }).slice(0, 60);
+  if (!hits.length) { $("res").innerHTML = '<div class="empty">目前沒有「' + esc(raw.toUpperCase()) + '」，按 Enter 或掃描可以新增</div>'; return; }
+  $("res").innerHTML = hits.map(function (it) {
+    return '<div class="it" onclick="pickById(' + it.id + ')"><div class="n"><b>' + esc(it.name) + '</b><span>' + esc(properOf(it) || "（無料號）") +
+      '</span></div><div class="s">' + it.stock + '</div></div>';
+  }).join("");
+}
 function search(raw) {
   raw = String(raw || "").trim(); if (!raw) { $("res").innerHTML = ""; return; }
   var conv = looksLikeCode(raw) ? toProper(raw) : raw;
@@ -921,7 +934,7 @@ document.addEventListener("click", function () { setTimeout(refocus, 0); });
 document.addEventListener("change", function () { setTimeout(refocus, 0); });
 $("photo").addEventListener("change", function () { scanPhoto(this.files && this.files[0]); });
 $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(this.value); } });
-$("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2 && !looksLikeCode(v)) search(v); else if (!v) $("res").innerHTML = ""; });
+$("q").addEventListener("input", function () { var v = this.value.trim(); if (v.length >= 2) liveSearch(v); else if (!v) $("res").innerHTML = ""; });
 $("cnt").addEventListener("input", showDiff);
 $("cnt").addEventListener("keydown", function (e) { if (e.key === "Enter") submitCount(); });
 $("otT").addEventListener("change", renderList); $("otI").addEventListener("change", renderList);
